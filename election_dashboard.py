@@ -125,7 +125,7 @@ with st.sidebar:
     st.markdown("#### 🔐 Admin")
     admin_key = st.text_input("Admin Key", type="password", key="admin_key")
 
-    if admin_key and admin_key == st.secrets["ADMIN_PASSWORD"]:
+    if admin_key and admin_key == st.secrets["admin"]["ADMIN_PASSWORD"]:
         st.success("✓ Admin access granted")
         st.markdown("#### 📤 Upload Election Data")
 
@@ -192,7 +192,7 @@ with st.sidebar:
                         if st.button("✅ Confirm & Insert New Rows", type="primary"):
                             with st.spinner(f"Inserting {len(new_rows)} rows..."):
                                 try:
-                                    records = new_rows.to_dict(orient="records")
+                                    records = new_rows.drop(columns=["total_votes"], errors="ignore").to_dict(orient="records")
                                     # Insert in batches of 100
                                     batch_size = 100
                                     inserted = 0
@@ -210,7 +210,7 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Error reading file: {e}")
 
-    elif admin_key and admin_key != st.secrets["ADMIN_PASSWORD"]:
+    elif admin_key and admin_key != st.secrets["admin"]["ADMIN_PASSWORD"]:
         st.error("Incorrect key")
 
 # ── Load ───────────────────────────────────────────────────────────────────────
