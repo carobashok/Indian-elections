@@ -151,7 +151,7 @@ with st.sidebar:
                     for col in ["state","election","constituency","candidate","party"]:
                         xl[col] = xl[col].astype(str).str.strip()
                     for col in ["election_year","evm_votes","postal_votes","total_votes"]:
-                        xl[col] = xl[col].astype(int)
+                        xl[col] = pd.to_numeric(xl[col].astype(str).str.replace("-","0").str.strip(), errors="coerce").fillna(0).astype(int)
 
                     st.markdown(f"**{len(xl)} rows** found in file across **{xl['state'].nunique()}** state(s), **{xl['election_year'].nunique()}** year(s)")
 
