@@ -6,7 +6,6 @@ from supabase import create_client
 import warnings
 warnings.filterwarnings("ignore")
 
-# ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="India Election Results Dashboard",
     page_icon="🗳️",
@@ -14,24 +13,34 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Global font / layout defaults ─────────────────────────────────────────────
-FONT = dict(family="DM Sans, sans-serif", size=15, color="#1a1a2e")
+# ── Global chart defaults ──────────────────────────────────────────────────────
+FONT       = dict(family="DM Sans, sans-serif", size=16, color="#1a1a2e")
+GRID_COLOR = "#f0f0f0"
+BAR_HEIGHT = 70   # px per bar row
 
-def base_layout(**overrides):
-    layout = dict(
+def hbar_layout(n_bars, left_margin=260, right_margin=140, title_x="", title_y="", **kw):
+    """Standard layout for every horizontal bar chart."""
+    d = dict(
         font=FONT,
         plot_bgcolor="white",
         paper_bgcolor="white",
-        margin=dict(l=20, r=110, t=40, b=20),
-        xaxis=dict(tickfont=dict(size=14), title_font=dict(size=14),
-                   showgrid=True, gridcolor="#f3f4f6"),
-        yaxis=dict(tickfont=dict(size=14), title_font=dict(size=14)),
-        legend=dict(font=dict(size=13)),
+        height=max(420, n_bars * BAR_HEIGHT),
+        margin=dict(l=left_margin, r=right_margin, t=50, b=40),
+        xaxis=dict(
+            showgrid=True, gridcolor=GRID_COLOR,
+            tickfont=dict(size=15), title_font=dict(size=15),
+            title=title_x,
+        ),
+        yaxis=dict(
+            tickfont=dict(size=15), title_font=dict(size=15),
+            title=title_y, automargin=True,
+        ),
+        showlegend=False,
     )
-    layout.update(overrides)
-    return layout
+    d.update(kw)
+    return d
 
-def shorten(name: str, n: int = 28) -> str:
+def shorten(name: str, n: int = 32) -> str:
     return name[:n] + "…" if len(name) > n else name
 
 # ── CSS ────────────────────────────────────────────────────────────────────────
@@ -39,25 +48,16 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@400;500;600&display=swap');
 html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
-.main-header {
-    font-family: 'Playfair Display', serif; font-size: 2.6rem;
-    font-weight: 900; color: #1a1a2e; line-height: 1.1; margin-bottom: 0;
-}
-.sub-header { font-size: 0.95rem; color: #6b7280; margin-top: 4px; margin-bottom: 1.5rem; }
-.kpi-card {
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-    border-radius: 12px; padding: 1.2rem 1.5rem; color: white;
-}
-.kpi-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1.5px; color: #9ca3af; margin-bottom: 4px; }
-.kpi-value { font-family: 'Playfair Display', serif; font-size: 2rem; font-weight: 700; color: #f59e0b; line-height: 1; }
-.kpi-sub { font-size: 0.78rem; color: #6b7280; margin-top: 4px; }
-.section-title {
-    font-family: 'Playfair Display', serif; font-size: 1.3rem; font-weight: 700;
-    color: #1a1a2e; border-left: 4px solid #f59e0b; padding-left: 0.75rem; margin: 1.5rem 0 1rem 0;
-}
+.main-header { font-family:'Playfair Display',serif; font-size:2.4rem; font-weight:900; color:#1a1a2e; line-height:1.1; margin-bottom:0; }
+.sub-header  { font-size:0.9rem; color:#6b7280; margin-top:4px; margin-bottom:1.4rem; }
+.kpi-card    { background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%); border-radius:12px; padding:1.1rem 1.4rem; color:white; }
+.kpi-label   { font-size:0.72rem; text-transform:uppercase; letter-spacing:1.5px; color:#9ca3af; margin-bottom:4px; }
+.kpi-value   { font-family:'Playfair Display',serif; font-size:1.9rem; font-weight:700; color:#f59e0b; line-height:1; }
+.kpi-sub     { font-size:0.75rem; color:#6b7280; margin-top:4px; }
+.section-title { font-family:'Playfair Display',serif; font-size:1.25rem; font-weight:700; color:#1a1a2e;
+                 border-left:4px solid #f59e0b; padding-left:0.75rem; margin:1.4rem 0 0.8rem 0; }
 </style>
 """, unsafe_allow_html=True)
-
 
 # ── Supabase ───────────────────────────────────────────────────────────────────
 @st.cache_resource
@@ -65,16 +65,16 @@ def get_client():
     return create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
 
 @st.cache_data(ttl=300)
-def load_filter_options() -> pd.DataFrame:
-    resp = get_client().table("election_results").select("election_year, state, election").execute()
+def load_filter_options():
+    resp = get_client().table("election_results").select("election_year,state,election").execute()
     df = pd.DataFrame(resp.data)
     if not df.empty:
-        df["state"] = df["state"].str.strip()
+        df["state"]    = df["state"].str.strip()
         df["election"] = df["election"].str.strip()
     return df
 
 @st.cache_data(ttl=300)
-def load_data(year, state, election) -> pd.DataFrame:
+def load_data(year, state, election):
     resp = (
         get_client().table("election_results").select("*")
         .eq("election_year", year).eq("state", state).eq("election", election)
@@ -85,19 +85,18 @@ def load_data(year, state, election) -> pd.DataFrame:
         df["constituency"] = df["constituency"].str.strip()
         df["candidate"]    = df["candidate"].str.strip()
         df["party"]        = df["party"].str.strip()
-        for col in ["total_votes", "evm_votes", "postal_votes"]:
-            df[col] = df[col].astype(int)
+        for c in ["total_votes","evm_votes","postal_votes"]:
+            df[c] = df[c].astype(int)
     return df
 
-def compute_winners(df: pd.DataFrame) -> pd.DataFrame:
+def compute_winners(df):
     df2 = df.copy()
     df2["rank"] = df2.groupby("constituency")["total_votes"].rank(method="first", ascending=False).astype(int)
-    winners = df2[df2["rank"] == 1][["constituency", "candidate", "party", "total_votes"]].copy()
-    runners = df2[df2["rank"] == 2][["constituency", "total_votes"]].rename(columns={"total_votes": "runner_up_votes"})
+    winners = df2[df2["rank"]==1][["constituency","candidate","party","total_votes"]].copy()
+    runners = df2[df2["rank"]==2][["constituency","total_votes"]].rename(columns={"total_votes":"runner_up_votes"})
     winners = winners.merge(runners, on="constituency", how="left")
     winners["margin"] = (winners["total_votes"] - winners["runner_up_votes"].fillna(0)).astype(int)
-    return winners[["constituency", "candidate", "party", "total_votes", "margin"]]
-
+    return winners[["constituency","candidate","party","total_votes","margin"]]
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -113,13 +112,12 @@ with st.sidebar:
         st.error("No data found."); st.stop()
 
     sel_year     = st.selectbox("📅 Election Year", sorted(fdf["election_year"].dropna().unique(), reverse=True))
-    sel_state    = st.selectbox("🏛️ State", sorted(fdf[fdf["election_year"] == sel_year]["state"].unique()))
+    sel_state    = st.selectbox("🏛️ State",         sorted(fdf[fdf["election_year"]==sel_year]["state"].unique()))
     sel_election = st.selectbox("🗂️ Election Type", sorted(
-        fdf[(fdf["election_year"] == sel_year) & (fdf["state"] == sel_state)]["election"].unique()
+        fdf[(fdf["election_year"]==sel_year)&(fdf["state"]==sel_state)]["election"].unique()
     ))
     st.divider()
     st.caption("Refreshes every 5 min · Powered by Supabase")
-
 
 # ── Load ───────────────────────────────────────────────────────────────────────
 df = load_data(sel_year, sel_state, sel_election)
@@ -129,8 +127,8 @@ if df.empty:
 winners_df     = compute_winners(df)
 total_votes    = df["total_votes"].sum()
 n_const        = df["constituency"].nunique()
-n_candidates   = df[df["candidate"] != "NOTA"]["candidate"].nunique()
-n_parties      = df[df["party"] != "None of the Above"]["party"].nunique()
+n_candidates   = df[df["candidate"]!="NOTA"]["candidate"].nunique()
+n_parties      = df[df["party"]!="None of the Above"]["party"].nunique()
 seats_by_party = winners_df.groupby("party").size()
 leading_party  = seats_by_party.idxmax()
 seats_leading  = int(seats_by_party.max())
@@ -138,30 +136,27 @@ seats_leading  = int(seats_by_party.max())
 # ── Header ─────────────────────────────────────────────────────────────────────
 st.markdown(
     f'<div class="main-header">🗳️ {sel_state} · {sel_election} · {sel_year}</div>'
-    f'<div class="sub-header">Live results · election_results · Supabase</div>',
+    f'<div class="sub-header">Live results · Supabase · election_results</div>',
     unsafe_allow_html=True,
 )
 
 # ── KPIs ───────────────────────────────────────────────────────────────────────
-def kpi_card(col, label, value, sub=""):
+def kpi(col, label, value, sub=""):
     col.markdown(
         f'<div class="kpi-card"><div class="kpi-label">{label}</div>'
         f'<div class="kpi-value">{value}</div><div class="kpi-sub">{sub}</div></div>',
         unsafe_allow_html=True,
     )
 
-c1, c2, c3, c4, c5 = st.columns(5)
-kpi_card(c1, "Constituencies", str(n_const),                   "total seats")
-kpi_card(c2, "Candidates",     f"{n_candidates:,}",            "excl. NOTA")
-kpi_card(c3, "Parties",        str(n_parties),                 "in the fray")
-kpi_card(c4, "Total Votes",    f"{total_votes/1_00_000:.2f}L", "lakh votes polled")
-kpi_card(c5, "Leading Party",  str(seats_leading),             f"seats · {shorten(leading_party, 20)}")
+c1,c2,c3,c4,c5 = st.columns(5)
+kpi(c1,"Constituencies", str(n_const),                    "total seats")
+kpi(c2,"Candidates",     f"{n_candidates:,}",             "excl. NOTA")
+kpi(c3,"Parties",        str(n_parties),                  "in the fray")
+kpi(c4,"Total Votes",    f"{total_votes/1_00_000:.2f}L",  "lakh votes polled")
+kpi(c5,"Leading Party",  str(seats_leading),              f"seats · {shorten(leading_party,20)}")
 st.divider()
 
-tab1, tab2, tab3, tab4 = st.tabs([
-    "🏆  Winners Board", "🎯  Party Performance", "🥧  Vote Share", "👤  Candidate Comparison"
-])
-
+tab1,tab2,tab3,tab4 = st.tabs(["🏆  Winners Board","🎯  Party Performance","🥧  Vote Share","👤  Candidate Comparison"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 · Winners Board
@@ -169,7 +164,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 with tab1:
     st.markdown('<div class="section-title">Constituency-wise Winners</div>', unsafe_allow_html=True)
     disp = winners_df.copy().sort_values("constituency")
-    disp.columns = ["Constituency", "Winner", "Party", "Votes", "Winning Margin"]
+    disp.columns = ["Constituency","Winner","Party","Votes","Winning Margin"]
     st.dataframe(
         disp, use_container_width=True, height=500, hide_index=True,
         column_config={
@@ -181,25 +176,29 @@ with tab1:
     )
 
     st.markdown('<div class="section-title">Top 15 · Largest Winning Margins</div>', unsafe_allow_html=True)
-    tm = disp.nlargest(15, "Winning Margin").copy()
-    tm["Party Short"] = tm["Party"].apply(lambda p: shorten(p, 28))
+    tm = disp.nlargest(15,"Winning Margin").copy()
+    tm["Party Short"] = tm["Party"].apply(lambda p: shorten(p,30))
+    tm = tm.sort_values("Winning Margin", ascending=True)   # bottom = smallest for h-bar
 
-    fig = px.bar(tm, x="Winning Margin", y="Constituency", orientation="h",
-                 color="Party Short", text="Winning Margin",
-                 color_discrete_sequence=px.colors.qualitative.Bold, custom_data=["Party"])
-    fig.update_traces(
-        texttemplate="%{text:,}", textposition="outside",
-        textfont=dict(size=14, color="#1a1a2e"),
-        hovertemplate="<b>%{y}</b><br>Margin: %{x:,}<br>Party: %{customdata[0]}<extra></extra>",
-    )
-    fig.update_layout(**base_layout(
-        height=580,
-        yaxis=dict(autorange="reversed", tickfont=dict(size=14), title=""),
-        xaxis=dict(showgrid=True, gridcolor="#f3f4f6", tickfont=dict(size=13),
-                   title=dict(text="Winning Margin (votes)", font=dict(size=14))),
-        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="left", x=0,
-                    font=dict(size=13), title=dict(text="Party", font=dict(size=13))),
-        margin=dict(l=20, r=110, t=80, b=20),
+    fig = go.Figure()
+    colors = px.colors.qualitative.Bold
+    party_color = {p: colors[i % len(colors)] for i, p in enumerate(tm["Party Short"].unique())}
+    for _, row in tm.iterrows():
+        fig.add_trace(go.Bar(
+            x=[row["Winning Margin"]],
+            y=[row["Constituency"]],
+            orientation="h",
+            marker_color=party_color.get(row["Party Short"], "#888"),
+            text=f'{row["Winning Margin"]:,}',
+            textposition="outside",
+            textfont=dict(size=15, color="#1a1a2e"),
+            name=row["Party Short"],
+            showlegend=False,
+            hovertemplate=f"<b>{row['Constituency']}</b><br>Winner: {row['Winner']}<br>Party: {row['Party']}<br>Margin: {row['Winning Margin']:,}<extra></extra>",
+        ))
+    fig.update_layout(**hbar_layout(
+        15, left_margin=200, right_margin=150,
+        title_x="Winning Margin (votes)",
     ))
     st.plotly_chart(fig, use_container_width=True)
 
@@ -208,64 +207,67 @@ with tab1:
 # TAB 2 · Party Performance
 # ══════════════════════════════════════════════════════════════════════════════
 with tab2:
+    # Seats won
     st.markdown('<div class="section-title">Seats Won by Party</div>', unsafe_allow_html=True)
     seats = (
         winners_df.groupby("party").size().reset_index(name="seats")
         .sort_values("seats", ascending=True)
     )
-    seats["party_short"] = seats["party"].apply(lambda p: shorten(p, 30))
+    seats["label"] = seats["party"].apply(lambda p: shorten(p, 32))
 
-    fig_s = px.bar(seats, x="seats", y="party_short", orientation="h",
-                   color="party_short", text="seats",
-                   color_discrete_sequence=px.colors.qualitative.Bold, custom_data=["party"])
-    fig_s.update_traces(
-        textposition="outside", textfont=dict(size=14),
-        hovertemplate="<b>%{customdata[0]}</b><br>Seats: %{x}<extra></extra>",
-    )
-    fig_s.update_layout(**base_layout(
-        height=max(380, len(seats) * 52), showlegend=False,
-        xaxis=dict(title="Seats Won", showgrid=True, gridcolor="#f3f4f6", tickfont=dict(size=14)),
-        yaxis=dict(title="", tickfont=dict(size=14)),
-        margin=dict(l=20, r=70, t=20, b=20),
-    ))
+    fig_s = go.Figure()
+    colors = px.colors.qualitative.Bold
+    for i, (_, row) in enumerate(seats.iterrows()):
+        fig_s.add_trace(go.Bar(
+            x=[row["seats"]],
+            y=[row["label"]],
+            orientation="h",
+            marker_color=colors[i % len(colors)],
+            text=str(row["seats"]),
+            textposition="outside",
+            textfont=dict(size=16, color="#1a1a2e"),
+            showlegend=False,
+            hovertemplate=f"<b>{row['party']}</b><br>Seats: {row['seats']}<extra></extra>",
+        ))
+    fig_s.update_layout(**hbar_layout(len(seats), left_margin=280, right_margin=80, title_x="Seats Won"))
     st.plotly_chart(fig_s, use_container_width=True)
 
+    # Total votes
     st.markdown('<div class="section-title">Total Votes by Party (Top 15)</div>', unsafe_allow_html=True)
     pv = (
-        df[df["party"] != "None of the Above"]
+        df[df["party"]!="None of the Above"]
         .groupby("party")["total_votes"].sum().reset_index()
         .sort_values("total_votes", ascending=True).tail(15)
     )
-    pv["vote_share"]  = (pv["total_votes"] / pv["total_votes"].sum() * 100).round(2)
-    pv["label"]       = pv["total_votes"].apply(lambda x: f"{x/1_00_000:.2f}L")
-    pv["party_short"] = pv["party"].apply(lambda p: shorten(p, 30))
+    pv["vote_share"] = (pv["total_votes"] / pv["total_votes"].sum() * 100).round(2)
+    pv["label"]      = pv["party"].apply(lambda p: shorten(p, 32))
+    pv["text_label"] = pv["total_votes"].apply(lambda x: f"{x/1_00_000:.2f}L")
 
-    fig_v = px.bar(pv, x="total_votes", y="party_short", orientation="h",
-                   color="party_short", text="label",
-                   color_discrete_sequence=px.colors.qualitative.Pastel,
-                   custom_data=["party", "vote_share"])
-    fig_v.update_traces(
-        textposition="outside", textfont=dict(size=14),
-        hovertemplate="<b>%{customdata[0]}</b><br>Votes: %{x:,}<br>Share: %{customdata[1]:.2f}%<extra></extra>",
-    )
-    fig_v.update_layout(**base_layout(
-        height=max(380, len(pv) * 52), showlegend=False,
-        xaxis=dict(title="Total Votes", showgrid=True, gridcolor="#f3f4f6", tickfont=dict(size=14)),
-        yaxis=dict(title="", tickfont=dict(size=14)),
-        margin=dict(l=20, r=90, t=20, b=20),
-    ))
+    fig_v = go.Figure()
+    colors2 = px.colors.qualitative.Safe
+    for i, (_, row) in enumerate(pv.iterrows()):
+        fig_v.add_trace(go.Bar(
+            x=[row["total_votes"]],
+            y=[row["label"]],
+            orientation="h",
+            marker_color=colors2[i % len(colors2)],
+            text=row["text_label"],
+            textposition="outside",
+            textfont=dict(size=15, color="#1a1a2e"),
+            showlegend=False,
+            hovertemplate=f"<b>{row['party']}</b><br>Votes: {row['total_votes']:,}<br>Share: {row['vote_share']:.2f}%<extra></extra>",
+        ))
+    fig_v.update_layout(**hbar_layout(len(pv), left_margin=280, right_margin=100, title_x="Total Votes"))
     st.plotly_chart(fig_v, use_container_width=True)
 
+    # Summary table
     st.markdown('<div class="section-title">Party Summary</div>', unsafe_allow_html=True)
-    summary = pv[["party", "total_votes", "vote_share"]].merge(
-        seats[["party", "seats"]], on="party", how="left"
-    ).fillna(0)
+    summary = pv[["party","total_votes","vote_share"]].merge(seats[["party","seats"]], on="party", how="left").fillna(0)
     summary["seats"] = summary["seats"].astype(int)
-    summary = summary.rename(columns={
-        "party": "Party", "total_votes": "Total Votes", "vote_share": "Vote Share %", "seats": "Seats Won"
-    }).sort_values("Seats Won", ascending=False)
+    summary = summary.rename(columns={"party":"Party","total_votes":"Total Votes","vote_share":"Vote Share %","seats":"Seats Won"})
+    summary = summary.sort_values("Seats Won", ascending=False)
     st.dataframe(
-        summary[["Party", "Seats Won", "Total Votes", "Vote Share %"]],
+        summary[["Party","Seats Won","Total Votes","Vote Share %"]],
         use_container_width=True, hide_index=True,
         column_config={
             "Total Votes":  st.column_config.NumberColumn(format="%d"),
@@ -283,70 +285,68 @@ with tab3:
     with left:
         st.markdown('<div class="section-title">Overall Vote Share · Top 10 Parties</div>', unsafe_allow_html=True)
         vs = (
-            df[df["party"] != "None of the Above"]
+            df[df["party"]!="None of the Above"]
             .groupby("party")["total_votes"].sum().reset_index()
             .sort_values("total_votes", ascending=False)
         )
         top10  = vs.head(10).copy()
         others = vs.iloc[10:]["total_votes"].sum()
         if others > 0:
-            top10 = pd.concat([top10, pd.DataFrame([{"party": "Others", "total_votes": others}])], ignore_index=True)
-        top10["party_short"] = top10["party"].apply(lambda p: shorten(p, 22))
+            top10 = pd.concat([top10, pd.DataFrame([{"party":"Others","total_votes":others}])], ignore_index=True)
+        top10["party_short"] = top10["party"].apply(lambda p: shorten(p, 20))
 
         fig_pie = px.pie(top10, values="total_votes", names="party_short",
-                         hole=0.45, color_discrete_sequence=px.colors.qualitative.Bold,
+                         hole=0.42, color_discrete_sequence=px.colors.qualitative.Bold,
                          custom_data=["party"])
         fig_pie.update_traces(
-            textposition="inside", textinfo="percent+label", textfont=dict(size=13),
+            textposition="inside", textinfo="percent+label",
+            textfont=dict(size=14, family="DM Sans, sans-serif"),
             hovertemplate="<b>%{customdata[0]}</b><br>Votes: %{value:,}<br>%{percent}<extra></extra>",
         )
-        fig_pie.update_layout(font=FONT, height=460, showlegend=False, margin=dict(l=10, r=10, t=30, b=10))
+        fig_pie.update_layout(font=FONT, height=480, showlegend=False, margin=dict(l=10,r=10,t=30,b=10))
         st.plotly_chart(fig_pie, use_container_width=True)
 
     with right:
         st.markdown('<div class="section-title">EVM vs Postal Votes</div>', unsafe_allow_html=True)
         fig_evm = go.Figure(go.Bar(
-            x=["EVM Votes", "Postal Votes"],
+            x=["EVM Votes","Postal Votes"],
             y=[df["evm_votes"].sum(), df["postal_votes"].sum()],
-            marker_color=["#1a1a2e", "#f59e0b"],
+            marker_color=["#1a1a2e","#f59e0b"],
             text=[f"{df['evm_votes'].sum()/1_00_000:.2f}L", f"{df['postal_votes'].sum()/1_000:.1f}K"],
             textposition="outside",
-            textfont=dict(size=15, color="#1a1a2e"),
+            textfont=dict(size=17, color="#1a1a2e"),
         ))
-        fig_evm.update_layout(**base_layout(
-            height=460,
-            xaxis=dict(tickfont=dict(size=15), title=""),
-            yaxis=dict(title="Votes", showgrid=True, gridcolor="#f3f4f6", tickfont=dict(size=14)),
-            margin=dict(l=20, r=20, t=30, b=20),
-        ))
+        fig_evm.update_layout(
+            font=FONT, plot_bgcolor="white", paper_bgcolor="white", height=480,
+            xaxis=dict(tickfont=dict(size=17), title=""),
+            yaxis=dict(title="Votes", showgrid=True, gridcolor=GRID_COLOR, tickfont=dict(size=15)),
+            margin=dict(l=20,r=20,t=40,b=20),
+        )
         st.plotly_chart(fig_evm, use_container_width=True)
 
     st.markdown('<div class="section-title">Constituency-level Vote Share</div>', unsafe_allow_html=True)
     sel_const_vs = st.selectbox("Select Constituency", sorted(df["constituency"].unique()), key="vs_const")
-    c_df = df[df["constituency"] == sel_const_vs].sort_values("total_votes", ascending=True).copy()
-    c_df["share"]       = (c_df["total_votes"] / c_df["total_votes"].sum() * 100).round(2)
-    c_df["cand_label"]  = c_df["candidate"].apply(lambda n: shorten(n, 22))
-    c_df["party_short"] = c_df["party"].apply(lambda p: shorten(p, 24))
+    c_df = df[df["constituency"]==sel_const_vs].sort_values("total_votes", ascending=True).copy()
+    c_df["share"]      = (c_df["total_votes"] / c_df["total_votes"].sum() * 100).round(2)
+    c_df["cand_label"] = c_df["candidate"].apply(lambda n: shorten(n, 24))
+    c_df["pty_short"]  = c_df["party"].apply(lambda p: shorten(p, 26))
 
-    fig_cv = px.bar(c_df, x="total_votes", y="cand_label", orientation="h",
-                    color="party_short", text="share",
-                    color_discrete_sequence=px.colors.qualitative.Bold,
-                    custom_data=["candidate", "party", "evm_votes", "postal_votes"])
-    fig_cv.update_traces(
-        texttemplate="%{text:.1f}%", textposition="outside", textfont=dict(size=14),
-        hovertemplate=(
-            "<b>%{customdata[0]}</b><br>Party: %{customdata[1]}<br>"
-            "EVM: %{customdata[2]:,}<br>Postal: %{customdata[3]:,}<br>Total: %{x:,}<extra></extra>"
-        ),
-    )
-    fig_cv.update_layout(**base_layout(
-        height=max(400, len(c_df) * 52),
-        xaxis=dict(title="Total Votes", showgrid=True, gridcolor="#f3f4f6", tickfont=dict(size=14)),
-        yaxis=dict(title="", tickfont=dict(size=14)),
-        legend=dict(orientation="h", yanchor="bottom", y=1.01, font=dict(size=13),
-                    title=dict(text="Party", font=dict(size=13))),
-        margin=dict(l=20, r=80, t=60, b=20),
-    ))
+    fig_cv = go.Figure()
+    colors3 = px.colors.qualitative.Bold
+    pty_color = {p: colors3[i%len(colors3)] for i,p in enumerate(c_df["pty_short"].unique())}
+    for _, row in c_df.iterrows():
+        fig_cv.add_trace(go.Bar(
+            x=[row["total_votes"]],
+            y=[row["cand_label"]],
+            orientation="h",
+            marker_color=pty_color.get(row["pty_short"],"#888"),
+            text=f'{row["share"]:.1f}%',
+            textposition="outside",
+            textfont=dict(size=15, color="#1a1a2e"),
+            showlegend=False,
+            hovertemplate=f"<b>{row['candidate']}</b><br>Party: {row['party']}<br>EVM: {row['evm_votes']:,}<br>Postal: {row['postal_votes']:,}<br>Total: {row['total_votes']:,}<extra></extra>",
+        ))
+    fig_cv.update_layout(**hbar_layout(len(c_df), left_margin=260, right_margin=100, title_x="Total Votes"))
     st.plotly_chart(fig_cv, use_container_width=True)
 
 
@@ -356,13 +356,13 @@ with tab3:
 with tab4:
     st.markdown('<div class="section-title">Candidate-wise Results by Constituency</div>', unsafe_allow_html=True)
     sel_const   = st.selectbox("Select Constituency", sorted(df["constituency"].unique()), key="cand_const")
-    cand_df     = df[df["constituency"] == sel_const].sort_values("total_votes", ascending=True).copy()
+    cand_df     = df[df["constituency"]==sel_const].sort_values("total_votes", ascending=True).copy()
     winner_name = cand_df.iloc[-1]["candidate"]
 
     fig_cand = go.Figure()
     for _, row in cand_df.iterrows():
         is_w  = row["candidate"] == winner_name
-        label = f"{'🏆 ' if is_w else ''}{shorten(row['candidate'], 22)} ({shorten(row['party'], 20)})"
+        label = f"{'🏆 ' if is_w else ''}{shorten(row['candidate'],24)}"
         fig_cand.add_trace(go.Bar(
             x=[row["total_votes"]],
             y=[label],
@@ -370,7 +370,7 @@ with tab4:
             marker_color="#f59e0b" if is_w else "#1a1a2e",
             text=f"{row['total_votes']:,}",
             textposition="outside",
-            textfont=dict(size=14, color="#1a1a2e"),
+            textfont=dict(size=15, color="#1a1a2e"),
             showlegend=False,
             hovertemplate=(
                 f"<b>{row['candidate']}</b><br>Party: {row['party']}<br>"
@@ -378,21 +378,15 @@ with tab4:
                 f"Total: {row['total_votes']:,}<extra></extra>"
             ),
         ))
-
-    fig_cand.update_layout(**base_layout(
-        height=max(420, len(cand_df) * 52),
-        xaxis=dict(title="Total Votes", showgrid=True, gridcolor="#f3f4f6", tickfont=dict(size=14)),
-        yaxis=dict(tickfont=dict(size=14), title=""),
-        margin=dict(l=20, r=110, t=20, b=20),
-    ))
+    fig_cand.update_layout(**hbar_layout(len(cand_df), left_margin=260, right_margin=130, title_x="Total Votes"))
     st.plotly_chart(fig_cand, use_container_width=True)
 
     total_c = cand_df["total_votes"].sum()
-    w_row   = cand_df[cand_df["candidate"] == winner_name].iloc[0]
+    w_row   = cand_df[cand_df["candidate"]==winner_name].iloc[0]
     r_row   = cand_df.sort_values("total_votes", ascending=False).iloc[1]
     margin  = int(w_row["total_votes"]) - int(r_row["total_votes"])
 
-    m1, m2, m3 = st.columns(3)
+    m1,m2,m3 = st.columns(3)
     m1.metric("🏆 Winner",         w_row["candidate"],  w_row["party"])
     m2.metric("📊 Winning Margin", f"{margin:,} votes", f"{margin/total_c*100:.1f}% of total")
     m3.metric("🗳️ Total Votes",    f"{total_c:,}",      f"{len(cand_df)} candidates")
