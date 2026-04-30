@@ -120,6 +120,99 @@ with st.sidebar:
     st.divider()
     st.caption("Refreshes every 5 min · Powered by Supabase")
 
+    # ── Admin Upload Section ───────────────────────────────────────────────────
+    st.divider()
+    st.markdown("#### 🔐 Admin")
+    admin_key = st.text_input("Admin Key", type="password", key="admin_key")
+
+    if admin_key and admin_key == st.secrets["ADMIN_PASSWORD"]:
+        st.success("✓ Admin access granted")
+        st.markdown("#### 📤 Upload Election Data")
+
+        uploaded_file = st.file_uploader(
+            "Upload Excel (.xlsx)",
+            type=["xlsx"],
+            help="Expected columns: State, Year, Election, Constituency, Candidate, Party, EVM Votes, Postal Votes, Total Votes"
+        )
+
+        if uploaded_file:
+            try:
+                xl = pd.read_excel(uploaded_file)
+
+                # ── Validate columns ───────────────────────────────────────────
+                required_cols = ["State","Year","Election","Constituency","Candidate","Party","EVM Votes","Postal Votes","Total Votes"]
+                missing = [c for c in required_cols if c not in xl.columns]
+                if missing:
+                    st.error(f"Missing columns: {', '.join(missing)}")
+                else:
+                    # ── Clean incoming data ────────────────────────────────────
+                    xl = xl[required_cols].copy()
+                    xl.columns = ["state","election_year","election","constituency","candidate","party","evm_votes","postal_votes","total_votes"]
+                    for col in ["state","election","constituency","candidate","party"]:
+                        xl[col] = xl[col].astype(str).str.strip()
+                    for col in ["election_year","evm_votes","postal_votes","total_votes"]:
+                        xl[col] = xl[col].astype(int)
+
+                    st.markdown(f"**{len(xl)} rows** found in file across **{xl['state'].nunique()}** state(s), **{xl['election_year'].nunique()}** year(s)")
+
+                    # ── Fetch existing keys from Supabase ──────────────────────
+                    with st.spinner("Checking for duplicates..."):
+                        existing_resp = get_client().table("election_results")                             .select("election_year,state,election,constituency,candidate")                             .execute()
+                        existing_df = pd.DataFrame(existing_resp.data)
+
+                    if not existing_df.empty:
+                        for col in ["state","election","constituency","candidate"]:
+                            existing_df[col] = existing_df[col].astype(str).str.strip()
+                        existing_df["election_year"] = existing_df["election_year"].astype(int)
+                        existing_keys = set(
+                            zip(existing_df["election_year"], existing_df["state"],
+                                existing_df["election"], existing_df["constituency"],
+                                existing_df["candidate"])
+                        )
+                    else:
+                        existing_keys = set()
+
+                    # ── Split into new vs duplicate ────────────────────────────
+                    xl["_key"] = list(zip(xl["election_year"], xl["state"],
+                                          xl["election"], xl["constituency"],
+                                          xl["candidate"]))
+                    new_rows  = xl[~xl["_key"].isin(existing_keys)].drop(columns=["_key"])
+                    dup_rows  = xl[ xl["_key"].isin(existing_keys)].drop(columns=["_key"])
+
+                    # ── Summary ────────────────────────────────────────────────
+                    col1, col2 = st.columns(2)
+                    col1.metric("✅ New rows to insert", len(new_rows))
+                    col2.metric("⚠️ Duplicates (will skip)", len(dup_rows))
+
+                    if len(dup_rows) > 0:
+                        with st.expander("View duplicate rows"):
+                            st.dataframe(dup_rows[["state","election_year","election","constituency","candidate"]], hide_index=True)
+
+                    if len(new_rows) > 0:
+                        if st.button("✅ Confirm & Insert New Rows", type="primary"):
+                            with st.spinner(f"Inserting {len(new_rows)} rows..."):
+                                try:
+                                    records = new_rows.to_dict(orient="records")
+                                    # Insert in batches of 100
+                                    batch_size = 100
+                                    inserted = 0
+                                    for i in range(0, len(records), batch_size):
+                                        batch = records[i:i+batch_size]
+                                        get_client().table("election_results").insert(batch).execute()
+                                        inserted += len(batch)
+                                    st.success(f"✅ Successfully inserted {inserted} rows!")
+                                    st.cache_data.clear()
+                                except Exception as e:
+                                    st.error(f"Insert failed: {e}")
+                    else:
+                        st.info("No new rows to insert — all data already exists in the database.")
+
+            except Exception as e:
+                st.error(f"Error reading file: {e}")
+
+    elif admin_key and admin_key != st.secrets["ADMIN_PASSWORD"]:
+        st.error("Incorrect key")
+
 # ── Load ───────────────────────────────────────────────────────────────────────
 df = load_data(sel_year, sel_state, sel_election)
 if df.empty:
