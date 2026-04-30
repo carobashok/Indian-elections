@@ -117,16 +117,14 @@ def load_data(year: int, state: str, election: str) -> pd.DataFrame:
 
 # ── Winner computation ─────────────────────────────────────────────────────────
 def compute_winners(df: pd.DataFrame) -> pd.DataFrame:
-    ranked  = df.sort_values("total_votes", ascending=False)
-    winners = ranked.groupby("constituency").first().reset_index()
-    runner  = (
-        ranked.groupby("constituency", group_keys=False)
-        .apply(lambda x: x.iloc[1] if len(x) > 1 else None)
-        .dropna()
-        .reset_index(drop=True)[["constituency", "total_votes"]]
-        .rename(columns={"total_votes": "runner_up_votes"})
-    )
-    winners = winners.merge(runner, on="constituency", how="left")
+    # rank candidates within each constituency by votes (1 = highest)
+    df2 = df.copy()
+    df2["rank"] = df2.groupby("constituency")["total_votes"].rank(method="first", ascending=False).astype(int)
+
+    winners  = df2[df2["rank"] == 1][["constituency", "candidate", "party", "total_votes"]].copy()
+    runners  = df2[df2["rank"] == 2][["constituency", "total_votes"]].rename(columns={"total_votes": "runner_up_votes"})
+
+    winners  = winners.merge(runners, on="constituency", how="left")
     winners["margin"] = (winners["total_votes"] - winners["runner_up_votes"].fillna(0)).astype(int)
     return winners[["constituency", "candidate", "party", "total_votes", "margin"]]
 
