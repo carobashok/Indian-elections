@@ -246,19 +246,30 @@ with tab1:
     )
 
     st.markdown('<div class="section-title">Top 15 · Largest Winning Margins</div>', unsafe_allow_html=True)
-    top_margin = disp.nlargest(15, "Winning Margin")
+    top_margin = disp.nlargest(15, "Winning Margin").copy()
+    top_margin["Party Short"] = top_margin["Party"].apply(lambda p: p[:30] + "\u2026" if len(p) > 30 else p)
     fig = px.bar(
         top_margin, x="Winning Margin", y="Constituency",
-        orientation="h", color="Party", text="Winning Margin",
+        orientation="h", color="Party Short", text="Winning Margin",
         color_discrete_sequence=px.colors.qualitative.Bold,
+        custom_data=["Party"],
     )
-    fig.update_traces(texttemplate="%{text:,}", textposition="outside")
+    fig.update_traces(
+        texttemplate="%{text:,}",
+        textposition="outside",
+        textfont=dict(size=13, color="#1a1a2e"),
+        hovertemplate="<b>%{y}</b><br>Margin: %{x:,}<br>Party: %{customdata[0]}<extra></extra>",
+    )
     fig.update_layout(
-        height=480, plot_bgcolor="white", paper_bgcolor="white",
-        yaxis=dict(autorange="reversed", tickfont=dict(size=11)),
-        xaxis=dict(showgrid=True, gridcolor="#f3f4f6"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02),
-        margin=dict(l=10, r=40, t=10, b=10),
+        height=580,
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        yaxis=dict(autorange="reversed", tickfont=dict(size=13), title=""),
+        xaxis=dict(showgrid=True, gridcolor="#f3f4f6", tickfont=dict(size=12),
+                   title=dict(text="Winning Margin (votes)", font=dict(size=13))),
+        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="left", x=0,
+                    font=dict(size=12), title=dict(text="Party", font=dict(size=12))),
+        margin=dict(l=20, r=100, t=80, b=20),
     )
     st.plotly_chart(fig, use_container_width=True)
 
