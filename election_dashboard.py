@@ -14,7 +14,7 @@ st.set_page_config(
 )
 
 # ── Global chart defaults ──────────────────────────────────────────────────────
-FONT       = dict(family="DM Sans, sans-serif", size=16, color="#1a1a2e")
+FONT       = dict(family="DM Sans, sans-serif", size=16, color="#111111")
 GRID_COLOR = "#f0f0f0"
 BAR_HEIGHT = 70   # px per bar row
 
@@ -28,11 +28,12 @@ def hbar_layout(n_bars, left_margin=260, right_margin=140, title_x="", title_y="
         margin=dict(l=left_margin, r=right_margin, t=50, b=40),
         xaxis=dict(
             showgrid=True, gridcolor=GRID_COLOR,
-            tickfont=dict(size=15), title_font=dict(size=15),
+            tickfont=dict(size=15, color="#111111", family="DM Sans, sans-serif"), title_font=dict(size=15),
             title=title_x,
         ),
         yaxis=dict(
-            tickfont=dict(size=15), title_font=dict(size=15),
+            tickfont=dict(size=15, color="#1a1a2e", family="DM Sans, sans-serif"),
+            title_font=dict(size=15),
             title=title_y, automargin=True,
         ),
         showlegend=False,
@@ -318,8 +319,8 @@ with tab3:
         ))
         fig_evm.update_layout(
             font=FONT, plot_bgcolor="white", paper_bgcolor="white", height=480,
-            xaxis=dict(tickfont=dict(size=17), title=""),
-            yaxis=dict(title="Votes", showgrid=True, gridcolor=GRID_COLOR, tickfont=dict(size=15)),
+            xaxis=dict(tickfont=dict(size=17, color="#111111", family="DM Sans, sans-serif"), title=""),
+            yaxis=dict(title="Votes", showgrid=True, gridcolor=GRID_COLOR, tickfont=dict(size=15, color="#111111", family="DM Sans, sans-serif")),
             margin=dict(l=20,r=20,t=40,b=20),
         )
         st.plotly_chart(fig_evm, use_container_width=True)
