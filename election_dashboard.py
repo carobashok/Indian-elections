@@ -76,11 +76,14 @@ def load_filter_options():
 
 @st.cache_data(ttl=300)
 def load_data(year, state, election):
-    resp = (
+    query = (
         get_client().table("election_results").select("*")
-        .eq("election_year", year).eq("state", state).eq("election", election)
-        .execute()
+        .eq("election_year", year)
+        .eq("election", election)
     )
+    if state != "All States":
+        query = query.eq("state", state)
+    resp = query.execute()
     df = pd.DataFrame(resp.data)
     if not df.empty:
         df["constituency"] = df["constituency"].str.strip()
@@ -112,11 +115,26 @@ with st.sidebar:
     if fdf.empty:
         st.error("No data found."); st.stop()
 
-    sel_year     = st.selectbox("📅 Election Year", sorted(fdf["election_year"].dropna().unique(), reverse=True))
-    sel_state    = st.selectbox("🏛️ State",         sorted(fdf[fdf["election_year"]==sel_year]["state"].unique()))
-    sel_election = st.selectbox("🗂️ Election Type", sorted(
-        fdf[(fdf["election_year"]==sel_year)&(fdf["state"]==sel_state)]["election"].unique()
-    ))
+    # 1️⃣ Election Type
+    all_elections = sorted(fdf["election"].unique())
+    sel_election  = st.selectbox("🗂️ Election Type", all_elections)
+
+    # 2️⃣ Year — scoped to election type
+    year_options = sorted(fdf[fdf["election"]==sel_election]["election_year"].dropna().unique(), reverse=True)
+    sel_year     = st.selectbox("📅 Election Year", year_options)
+
+    # 3️⃣ State — scoped to election type + year
+    state_options = sorted(fdf[
+        (fdf["election"]==sel_election) &
+        (fdf["election_year"]==sel_year)
+    ]["state"].unique())
+
+    # Add "All States" only for non-Assembly elections
+    is_assembly = "assembly" in sel_election.lower()
+    if not is_assembly:
+        state_options = ["All States"] + state_options
+
+    sel_state = st.selectbox("🏛️ State", state_options)
     st.divider()
     st.caption("Refreshes every 5 min · Powered by Supabase")
 
@@ -229,7 +247,7 @@ seats_leading  = int(seats_by_party.max())
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 st.markdown(
-    f'<div class="main-header">🗳️ {sel_state} · {sel_election} · {sel_year}</div>'
+    f'<div class="main-header">🗳️ {sel_election} · {sel_year} · {sel_state}</div>'
     f'<div class="sub-header">Live results · Supabase · election_results</div>',
     unsafe_allow_html=True,
 )
