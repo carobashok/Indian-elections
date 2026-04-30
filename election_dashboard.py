@@ -125,7 +125,7 @@ with st.sidebar:
     st.markdown("#### 🔐 Admin")
     admin_key = st.text_input("Admin Key", type="password", key="admin_key")
 
-    if admin_key and admin_key == st.secrets["admin"]["ADMIN_PASSWORD"]:
+    if admin_key and admin_key == st.secrets.get("ADMIN_PASSWORD", st.secrets.get("admin", {}).get("ADMIN_PASSWORD", "")):
         st.success("✓ Admin access granted")
         st.markdown("#### 📤 Upload Election Data")
 
@@ -210,7 +210,7 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Error reading file: {e}")
 
-    elif admin_key and admin_key != st.secrets["admin"]["ADMIN_PASSWORD"]:
+    elif admin_key and admin_key != st.secrets.get("ADMIN_PASSWORD", st.secrets.get("admin", {}).get("ADMIN_PASSWORD", "")):
         st.error("Incorrect key")
 
 # ── Load ───────────────────────────────────────────────────────────────────────
