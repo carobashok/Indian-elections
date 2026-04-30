@@ -1,4 +1,3 @@
-#python -m streamlit run election_dashboard.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -118,15 +117,16 @@ def load_data(year: int, state: str, election: str) -> pd.DataFrame:
 
 # ── Winner computation ─────────────────────────────────────────────────────────
 def compute_winners(df: pd.DataFrame) -> pd.DataFrame:
-    ranked   = df.sort_values("total_votes", ascending=False)
-    winners  = ranked.groupby("constituency").first().reset_index()
-    runner   = (
-        ranked.groupby("constituency")
-        .nth(1)["total_votes"]
-        .reset_index()
+    ranked  = df.sort_values("total_votes", ascending=False)
+    winners = ranked.groupby("constituency").first().reset_index()
+    runner  = (
+        ranked.groupby("constituency", group_keys=False)
+        .apply(lambda x: x.iloc[1] if len(x) > 1 else None)
+        .dropna()
+        .reset_index(drop=True)[["constituency", "total_votes"]]
         .rename(columns={"total_votes": "runner_up_votes"})
     )
-    winners  = winners.merge(runner, on="constituency", how="left")
+    winners = winners.merge(runner, on="constituency", how="left")
     winners["margin"] = (winners["total_votes"] - winners["runner_up_votes"].fillna(0)).astype(int)
     return winners[["constituency", "candidate", "party", "total_votes", "margin"]]
 
