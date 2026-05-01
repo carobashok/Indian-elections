@@ -436,48 +436,55 @@ with tab3:
         )
         st.plotly_chart(fig_evm, use_container_width=True)
 
-    st.markdown('<div class="section-title">Constituency-level Vote Share</div>', unsafe_allow_html=True)
-    sel_const_vs = st.selectbox("Select Constituency", sorted(df["constituency"].unique()), key="vs_const")
-    c_df = df[df["constituency"]==sel_const_vs].sort_values("total_votes", ascending=True).copy()
-    c_df["share"]      = (c_df["total_votes"] / c_df["total_votes"].sum() * 100).round(1)
-    # Y-axis: Candidate name (full), Party below
-    c_df["cand_label"] = c_df.apply(lambda r: f"{r['candidate']}<br><i>{shorten(r['party'], 40)}</i>", axis=1)
-    # Bar label: votes + share
-    c_df["bar_text"]   = c_df.apply(lambda r: f"{r['total_votes']:,} ({r['share']:.1f}%)", axis=1)
+    st.markdown('<div class="section-title">Party Contest & Strike Rate</div>', unsafe_allow_html=True)
 
-    fig_cv = go.Figure()
-    colors3   = px.colors.qualitative.Bold
-    pty_color = {p: colors3[i % len(colors3)] for i, p in enumerate(c_df["party"].unique())}
-    max_votes = c_df["total_votes"].max()
+    # ── Compute ranks per constituency ─────────────────────────────────────────
+    ranked = df.copy()
+    ranked["rank"] = ranked.groupby("constituency")["total_votes"].rank(method="first", ascending=False).astype(int)
 
-    for _, row in c_df.iterrows():
-        # use auto position — Plotly picks inside/outside based on bar width
-        fig_cv.add_trace(go.Bar(
-            x=[row["total_votes"]],
-            y=[row["cand_label"]],
-            orientation="h",
-            marker_color=pty_color.get(row["party"], "#888"),
-            text=row["bar_text"],
-            textposition="auto",
-            textfont=dict(size=14, color="#111111"),
-            insidetextfont=dict(size=14, color="#ffffff"),
-            showlegend=False,
-            hovertemplate=(
-                f"<b>{row['candidate']}</b><br>"
-                f"Party: {row['party']}<br>"
-                f"EVM: {row['evm_votes']:,}<br>"
-                f"Postal: {row['postal_votes']:,}<br>"
-                f"Total: {row['total_votes']:,} ({row['share']:.1f}%)"
-                f"<extra></extra>"
-            ),
-        ))
-    fig_cv.update_layout(**hbar_layout(
-        len(c_df),
-        left_margin=440,
-        right_margin=40,
-        title_x="Total Votes",
-    ))
-    st.plotly_chart(fig_cv, use_container_width=True)
+    # ── Aggregate per party ────────────────────────────────────────────────────
+    party_stats = []
+    for party, grp in ranked.groupby("party"):
+        contested   = len(grp)
+        won         = (grp["rank"] == 1).sum()
+        second      = (grp["rank"] == 2).sum()
+        third       = (grp["rank"] == 3).sum()
+        others      = contested - won - second - third
+        total_votes = grp["total_votes"].sum()
+        strike      = round(won / contested * 100, 1) if contested > 0 else 0
+        competitive = round((won + second) / contested * 100, 1) if contested > 0 else 0
+        party_stats.append({
+            "Party":            party,
+            "Contested":        contested,
+            "Won":              int(won),
+            "2nd":              int(second),
+            "3rd":              int(third),
+            "Others":           int(others),
+            "Strike Rate %":    strike,
+            "Competitive Rate %": competitive,
+            "Total Votes":      int(total_votes),
+        })
+
+    stats_df = pd.DataFrame(party_stats).sort_values("Won", ascending=False).reset_index(drop=True)
+
+    st.dataframe(
+        stats_df,
+        use_container_width=True,
+        hide_index=True,
+        height=500,
+        column_config={
+            "Party":              st.column_config.TextColumn("Party",              width="large"),
+            "Contested":          st.column_config.NumberColumn("Contested",        format="%d"),
+            "Won":                st.column_config.NumberColumn("Won",              format="%d"),
+            "2nd":                st.column_config.NumberColumn("2nd",              format="%d"),
+            "3rd":                st.column_config.NumberColumn("3rd",              format="%d"),
+            "Others":             st.column_config.NumberColumn("Others",           format="%d"),
+            "Strike Rate %":      st.column_config.NumberColumn("Strike Rate %",    format="%.1f%%"),
+            "Competitive Rate %": st.column_config.NumberColumn("Competitive Rate %", format="%.1f%%"),
+            "Total Votes":        st.column_config.NumberColumn("Total Votes",      format="%d"),
+        },
+    )
+    st.caption(f"Sorted by Won (descending) · {len(stats_df)} parties · Click any column header to re-sort")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
