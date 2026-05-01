@@ -295,12 +295,14 @@ with st.sidebar:
                         if st.button("✅ Confirm & Insert Alliances", type="primary"):
                             with st.spinner(f"Inserting {len(new_al)} rows..."):
                                 try:
+                                    # Replace all NaN with None before insert
+                                    new_al = new_al.where(pd.notnull(new_al), None)
                                     records = new_al.to_dict(orient="records")
                                     # convert None properly for JSON
                                     for r in records:
-                                        if r["state"] == "None" or r["state"] is None:
+                                        if r["state"] == "None":
                                             r["state"] = None
-                                        if r.get("constituency") == "None" or r.get("constituency") is None:
+                                        if r.get("constituency") == "None":
                                             r["constituency"] = None
                                     batch_size = 100
                                     inserted   = 0
