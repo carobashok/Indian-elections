@@ -435,6 +435,11 @@ with tab2:
             state_df = pd.DataFrame()
 
         # Build final map: national → overridden by state → overridden by constituency
+        # Never map "Independent" at party level — only constituency-specific mappings apply
+        nat_df   = nat_df[nat_df["party"] != "Independent"]
+        if not state_df.empty:
+            state_df = state_df[state_df["party"] != "Independent"]
+
         final = nat_df[["alliance_name","party","constituency"]].copy()
 
         if not state_df.empty:
