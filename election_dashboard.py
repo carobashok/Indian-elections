@@ -49,13 +49,13 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@400;500;600&display=swap');
 html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
-.main-header { font-family:'Playfair Display',serif; font-size:2.4rem; font-weight:900; color:#1a1a2e; line-height:1.1; margin-bottom:0; }
-.sub-header  { font-size:0.9rem; color:#6b7280; margin-top:4px; margin-bottom:1.4rem; }
+.main-header { font-family:'Playfair Display',serif; font-size:2.4rem; font-weight:900; color:#ffffff; line-height:1.1; margin-bottom:0; }
+.sub-header  { font-size:0.9rem; color:#cbd5e1; margin-top:4px; margin-bottom:1.4rem; }
 .kpi-card    { background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%); border-radius:12px; padding:1.1rem 1.4rem; color:white; }
 .kpi-label   { font-size:0.72rem; text-transform:uppercase; letter-spacing:1.5px; color:#9ca3af; margin-bottom:4px; }
 .kpi-value   { font-family:'Playfair Display',serif; font-size:1.9rem; font-weight:700; color:#f59e0b; line-height:1; }
 .kpi-sub     { font-size:0.75rem; color:#6b7280; margin-top:4px; }
-.section-title { font-family:'Playfair Display',serif; font-size:1.25rem; font-weight:700; color:#1a1a2e;
+.section-title { font-family:'Playfair Display',serif; font-size:1.25rem; font-weight:700; color:#ffffff;
                  border-left:4px solid #f59e0b; padding-left:0.75rem; margin:1.4rem 0 0.8rem 0; }
 </style>
 """, unsafe_allow_html=True)
