@@ -439,26 +439,39 @@ with tab3:
     st.markdown('<div class="section-title">Constituency-level Vote Share</div>', unsafe_allow_html=True)
     sel_const_vs = st.selectbox("Select Constituency", sorted(df["constituency"].unique()), key="vs_const")
     c_df = df[df["constituency"]==sel_const_vs].sort_values("total_votes", ascending=True).copy()
-    c_df["share"]      = (c_df["total_votes"] / c_df["total_votes"].sum() * 100).round(2)
-    c_df["cand_label"] = c_df["candidate"].apply(lambda n: shorten(n, 24))
-    c_df["pty_short"]  = c_df["party"].apply(lambda p: shorten(p, 26))
+    c_df["share"]      = (c_df["total_votes"] / c_df["total_votes"].sum() * 100).round(1)
+    # Y-axis label: Candidate | Party
+    c_df["cand_label"] = c_df.apply(lambda r: f"{shorten(r['candidate'],22)} | {shorten(r['party'],24)}", axis=1)
+    # Bar label: votes + share together
+    c_df["bar_text"]   = c_df.apply(lambda r: f"{r['total_votes']:,}  ({r['share']:.1f}%)", axis=1)
 
     fig_cv = go.Figure()
     colors3 = px.colors.qualitative.Bold
-    pty_color = {p: colors3[i%len(colors3)] for i,p in enumerate(c_df["pty_short"].unique())}
+    party_list = c_df["party"].unique()
+    pty_color  = {p: colors3[i % len(colors3)] for i, p in enumerate(party_list)}
+
     for _, row in c_df.iterrows():
         fig_cv.add_trace(go.Bar(
             x=[row["total_votes"]],
             y=[row["cand_label"]],
             orientation="h",
-            marker_color=pty_color.get(row["pty_short"],"#888"),
-            text=f'{row["share"]:.1f}%',
+            marker_color=pty_color.get(row["party"], "#888"),
+            text=row["bar_text"],
             textposition="outside",
-            textfont=dict(size=15, color="#1a1a2e"),
+            textfont=dict(size=14, color="#111111"),
             showlegend=False,
-            hovertemplate=f"<b>{row['candidate']}</b><br>Party: {row['party']}<br>EVM: {row['evm_votes']:,}<br>Postal: {row['postal_votes']:,}<br>Total: {row['total_votes']:,}<extra></extra>",
+            hovertemplate=(
+                f"<b>{row['candidate']}</b><br>"
+                f"Party: {row['party']}<br>"
+                f"EVM: {row['evm_votes']:,}<br>"
+                f"Postal: {row['postal_votes']:,}<br>"
+                f"Total: {row['total_votes']:,} ({row['share']:.1f}%)"
+                f"<extra></extra>"
+            ),
         ))
-    fig_cv.update_layout(**hbar_layout(len(c_df), left_margin=260, right_margin=100, title_x="Total Votes"))
+    fig_cv.update_layout(**hbar_layout(
+        len(c_df), left_margin=400, right_margin=230, title_x="Total Votes"
+    ))
     st.plotly_chart(fig_cv, use_container_width=True)
 
 
