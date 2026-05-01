@@ -459,6 +459,8 @@ with tab2:
     else:
         # ── Merge alliance into main df ────────────────────────────────────────
         adf = df.copy()
+        # Normalize constituency for reliable matching
+        adf["constituency_key"] = adf["constituency"].str.strip().str.upper()
 
         # Split alliance_map into constituency-specific and party-level
         const_map = alliance_map[alliance_map["constituency"].notna()].copy()
@@ -469,11 +471,16 @@ with tab2:
 
         # Then override with constituency-specific mapping where applicable
         if not const_map.empty:
+            const_map["constituency_key"] = const_map["constituency"].str.strip().str.upper()
             const_map = const_map.rename(columns={"alliance_name":"alliance_const"})
-            adf = adf.merge(const_map[["alliance_const","party","constituency"]], on=["party","constituency"], how="left")
+            adf = adf.merge(
+                const_map[["alliance_const","party","constituency_key"]],
+                on=["party","constituency_key"], how="left"
+            )
             adf["alliance_name"] = adf["alliance_const"].combine_first(adf["alliance_name"])
             adf = adf.drop(columns=["alliance_const"])
 
+        adf = adf.drop(columns=["constituency_key"])
         adf["alliance_name"] = adf["alliance_name"].fillna("Others / Unallied")
 
         # ── Winners with alliance ──────────────────────────────────────────────
