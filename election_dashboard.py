@@ -349,7 +349,7 @@ kpi(c4,"Total Votes",    f"{total_votes/1_00_000:.2f}L",  "lakh votes polled")
 kpi(c5,"Leading Party",  str(seats_leading),              f"seats · {shorten(leading_party,20)}")
 st.divider()
 
-tab1,tab2,tab3,tab4 = st.tabs(["🏆  Winners Board","🎯  Party Performance","🥧  Vote Share","👤  Candidate Comparison"])
+tab1,tab2,tab3,tab4,tab5 = st.tabs(["🏆  Winners Board","🤝  Alliance View","🎯  Party Performance","🥧  Vote Share","👤  Candidate Comparison"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 · Winners Board
@@ -397,9 +397,160 @@ with tab1:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 · Party Performance
+# TAB 2 · Alliance View
 # ══════════════════════════════════════════════════════════════════════════════
 with tab2:
+    st.markdown('<div class="section-title">Alliance-wise Performance</div>', unsafe_allow_html=True)
+
+    @st.cache_data(ttl=300)
+    def load_alliances(year, election, state):
+        client = get_client()
+        # fetch national mappings (state IS NULL)
+        nat = client.table("alliances").select("*")             .eq("election_year", year).eq("election", election)             .is_("state", "null").execute()
+        nat_df = pd.DataFrame(nat.data)
+
+        # fetch state-specific mappings
+        if state and state != "All States":
+            st8 = client.table("alliances").select("*")                 .eq("election_year", year).eq("election", election)                 .eq("state", state).execute()
+            st8_df = pd.DataFrame(st8.data)
+        else:
+            st8_df = pd.DataFrame()
+
+        if nat_df.empty and st8_df.empty:
+            return pd.DataFrame()
+
+        # state-specific overrides national for same party
+        if not st8_df.empty and not nat_df.empty:
+            override_parties = st8_df["party"].unique()
+            nat_df = nat_df[~nat_df["party"].isin(override_parties)]
+            combined = pd.concat([nat_df, st8_df], ignore_index=True)
+        elif not st8_df.empty:
+            combined = st8_df
+        else:
+            combined = nat_df
+
+        return combined[["alliance_name", "party"]].drop_duplicates()
+
+    alliance_map = load_alliances(sel_year, sel_election, sel_state)
+
+    if alliance_map.empty:
+        st.info("No alliance information available.")
+    else:
+        # ── Merge alliance into main df ────────────────────────────────────────
+        adf = df.copy()
+        adf = adf.merge(alliance_map, on="party", how="left")
+        adf["alliance_name"] = adf["alliance_name"].fillna("Others / Unallied")
+
+        # ── Winners with alliance ──────────────────────────────────────────────
+        adf["rank"] = adf.groupby("constituency")["total_votes"].rank(method="first", ascending=False).astype(int)
+
+        # ── KPI — seats per alliance ───────────────────────────────────────────
+        alliance_seats = adf[adf["rank"]==1].groupby("alliance_name").size().sort_values(ascending=False)
+        cols = st.columns(min(len(alliance_seats), 4))
+        for i, (alliance, seats) in enumerate(alliance_seats.items()):
+            if i < 4:
+                cols[i].markdown(
+                    f'<div class="kpi-card"><div class="kpi-label">{shorten(alliance,20)}</div>'
+                    f'<div class="kpi-value">{seats}</div><div class="kpi-sub">seats won</div></div>',
+                    unsafe_allow_html=True,
+                )
+
+        st.markdown('<div class="section-title">Seats Won by Alliance</div>', unsafe_allow_html=True)
+
+        # ── Seats bar ──────────────────────────────────────────────────────────
+        al_seats = (
+            adf[adf["rank"]==1].groupby("alliance_name").size()
+            .reset_index(name="seats").sort_values("seats", ascending=True)
+        )
+        fig_al = go.Figure()
+        colors_al = px.colors.qualitative.Bold
+        for i, (_, row) in enumerate(al_seats.iterrows()):
+            fig_al.add_trace(go.Bar(
+                x=[row["seats"]],
+                y=[row["alliance_name"]],
+                orientation="h",
+                marker_color=colors_al[i % len(colors_al)],
+                text=str(row["seats"]),
+                textposition="outside",
+                textfont=dict(size=15, color="#111111"),
+                showlegend=False,
+                hovertemplate=f"<b>{row['alliance_name']}</b><br>Seats: {row['seats']}<extra></extra>",
+            ))
+        fig_al.update_layout(**hbar_layout(len(al_seats), left_margin=240, right_margin=70, title_x="Seats Won"))
+        st.plotly_chart(fig_al, use_container_width=True)
+
+        # ── Alliance Strike Rate table ─────────────────────────────────────────
+        st.markdown('<div class="section-title">Alliance Contest & Strike Rate</div>', unsafe_allow_html=True)
+        al_stats = []
+        for alliance, grp in adf.groupby("alliance_name"):
+            contested   = grp["constituency"].nunique()
+            won         = (grp["rank"]==1).sum()
+            second      = (grp["rank"]==2).sum()
+            third       = (grp["rank"]==3).sum()
+            others      = int(grp["rank"].gt(3).sum())
+            total_votes = grp["total_votes"].sum()
+            strike      = round(won/contested*100, 1) if contested else 0
+            competitive = round((won+second)/contested*100, 1) if contested else 0
+            al_stats.append({
+                "Alliance":           alliance,
+                "Contested":          contested,
+                "Won":                int(won),
+                "2nd":                int(second),
+                "3rd":                int(third),
+                "Others":             others,
+                "Strike Rate %":      strike,
+                "Competitive Rate %": competitive,
+                "Total Votes":        int(total_votes),
+            })
+
+        al_stats_df = pd.DataFrame(al_stats).sort_values("Won", ascending=False).reset_index(drop=True)
+        st.dataframe(
+            al_stats_df, use_container_width=True, hide_index=True, height=300,
+            column_config={
+                "Alliance":           st.column_config.TextColumn("Alliance",           width="medium"),
+                "Contested":          st.column_config.NumberColumn("Contested",        format="%d"),
+                "Won":                st.column_config.NumberColumn("Won",              format="%d"),
+                "2nd":                st.column_config.NumberColumn("2nd",              format="%d"),
+                "3rd":                st.column_config.NumberColumn("3rd",              format="%d"),
+                "Others":             st.column_config.NumberColumn("Others",           format="%d"),
+                "Strike Rate %":      st.column_config.NumberColumn("Strike Rate %",    format="%.1f%%"),
+                "Competitive Rate %": st.column_config.NumberColumn("Competitive Rate %", format="%.1f%%"),
+                "Total Votes":        st.column_config.NumberColumn("Total Votes",      format="%d"),
+            },
+        )
+
+        # ── Party breakdown per alliance ───────────────────────────────────────
+        st.markdown('<div class="section-title">Party Breakdown by Alliance</div>', unsafe_allow_html=True)
+        for alliance in al_stats_df["Alliance"].tolist():
+            with st.expander(f"{alliance}  —  {al_stats_df[al_stats_df['Alliance']==alliance]['Won'].values[0]} seats won"):
+                grp = adf[adf["alliance_name"]==alliance]
+                pty_stats = []
+                for party, pgrp in grp.groupby("party"):
+                    pc = pgrp["constituency"].nunique()
+                    pw = (pgrp["rank"]==1).sum()
+                    p2 = (pgrp["rank"]==2).sum()
+                    p3 = (pgrp["rank"]==3).sum()
+                    pty_stats.append({
+                        "Party":       party,
+                        "Contested":   pc,
+                        "Won":         int(pw),
+                        "2nd":         int(p2),
+                        "3rd":         int(p3),
+                        "Strike Rate %": round(pw/pc*100,1) if pc else 0,
+                        "Total Votes": int(pgrp["total_votes"].sum()),
+                    })
+                pty_df = pd.DataFrame(pty_stats).sort_values("Won", ascending=False)
+                st.dataframe(pty_df, use_container_width=True, hide_index=True,
+                    column_config={
+                        "Total Votes":    st.column_config.NumberColumn(format="%d"),
+                        "Strike Rate %":  st.column_config.NumberColumn(format="%.1f%%"),
+                    }
+                )
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 2 · Party Performance
+# ══════════════════════════════════════════════════════════════════════════════
+with tab3:
     # Seats won
     st.markdown('<div class="section-title">Seats Won by Party</div>', unsafe_allow_html=True)
     seats = (
@@ -472,7 +623,7 @@ with tab2:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 · Vote Share
 # ══════════════════════════════════════════════════════════════════════════════
-with tab3:
+with tab4:
     left, right = st.columns(2)
 
     with left:
@@ -571,7 +722,7 @@ with tab3:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 4 · Candidate Comparison
 # ══════════════════════════════════════════════════════════════════════════════
-with tab4:
+with tab5:
     st.markdown('<div class="section-title">Candidate-wise Results by Constituency</div>', unsafe_allow_html=True)
     sel_const   = st.selectbox("Select Constituency", sorted(df["constituency"].unique()), key="cand_const")
     cand_df     = df[df["constituency"]==sel_const].sort_values("total_votes", ascending=True).copy()
