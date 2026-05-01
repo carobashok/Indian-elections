@@ -228,6 +228,87 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Error reading file: {e}")
 
+        # ── Alliance Upload ────────────────────────────────────────────────────
+        st.markdown("#### 🤝 Upload Alliance Data")
+        st.caption("Expected columns: Alliance, Party, Election Year, Election, State (leave blank for national)")
+
+        alliance_file = st.file_uploader(
+            "Upload Alliance Excel (.xlsx)",
+            type=["xlsx"],
+            key="alliance_upload"
+        )
+
+        if alliance_file:
+            try:
+                al = pd.read_excel(alliance_file)
+                required_al = ["Alliance", "Party", "Election Year", "Election", "State"]
+                missing_al  = [c for c in required_al if c not in al.columns]
+
+                if missing_al:
+                    st.error(f"Missing columns: {', '.join(missing_al)}")
+                else:
+                    al = al[required_al].copy()
+                    al.columns = ["alliance_name", "party", "election_year", "election", "state"]
+                    al["alliance_name"] = al["alliance_name"].astype(str).str.strip()
+                    al["party"]         = al["party"].astype(str).str.strip()
+                    al["election"]      = al["election"].astype(str).str.strip()
+                    al["election_year"] = pd.to_numeric(al["election_year"], errors="coerce").fillna(0).astype(int)
+                    # state: blank/NaN = None (national)
+                    al["state"] = al["state"].apply(lambda x: None if pd.isna(x) or str(x).strip() == "" else str(x).strip())
+
+                    st.markdown(f"**{len(al)} rows** found — **{al['alliance_name'].nunique()}** alliance(s), **{al['party'].nunique()}** party(ies)")
+
+                    # Check duplicates
+                    with st.spinner("Checking for duplicates..."):
+                        ex_resp = get_client().table("alliances")                             .select("alliance_name,party,election_year,election,state")                             .execute()
+                        ex_al = pd.DataFrame(ex_resp.data)
+
+                    if not ex_al.empty:
+                        ex_al["state"] = ex_al["state"].apply(lambda x: None if pd.isna(x) or x is None else str(x).strip())
+                        ex_keys = set(zip(ex_al["alliance_name"], ex_al["party"],
+                                         ex_al["election_year"], ex_al["election"],
+                                         ex_al["state"].astype(str)))
+                    else:
+                        ex_keys = set()
+
+                    al["_key"] = list(zip(al["alliance_name"], al["party"],
+                                          al["election_year"], al["election"],
+                                          al["state"].astype(str)))
+                    new_al  = al[~al["_key"].isin(ex_keys)].drop(columns=["_key"])
+                    dup_al  = al[ al["_key"].isin(ex_keys)].drop(columns=["_key"])
+
+                    c1, c2 = st.columns(2)
+                    c1.metric("✅ New rows to insert", len(new_al))
+                    c2.metric("⚠️ Duplicates (will skip)", len(dup_al))
+
+                    if len(dup_al) > 0:
+                        with st.expander("View duplicate rows"):
+                            st.dataframe(dup_al, hide_index=True)
+
+                    if len(new_al) > 0:
+                        if st.button("✅ Confirm & Insert Alliances", type="primary"):
+                            with st.spinner(f"Inserting {len(new_al)} rows..."):
+                                try:
+                                    records = new_al.to_dict(orient="records")
+                                    # convert None properly for JSON
+                                    for r in records:
+                                        if r["state"] == "None" or r["state"] is None:
+                                            r["state"] = None
+                                    batch_size = 100
+                                    inserted   = 0
+                                    for i in range(0, len(records), batch_size):
+                                        get_client().table("alliances").insert(records[i:i+batch_size]).execute()
+                                        inserted += len(records[i:i+batch_size])
+                                    st.success(f"✅ Successfully inserted {inserted} alliance rows!")
+                                    st.cache_data.clear()
+                                except Exception as e:
+                                    st.error(f"Insert failed: {e}")
+                    else:
+                        st.info("No new alliance rows to insert.")
+
+            except Exception as e:
+                st.error(f"Error reading alliance file: {e}")
+
     elif admin_key and admin_key != st.secrets.get("ADMIN_PASSWORD", st.secrets.get("admin", {}).get("ADMIN_PASSWORD", "")):
         st.error("Incorrect key")
 
