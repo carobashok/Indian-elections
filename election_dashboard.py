@@ -440,25 +440,27 @@ with tab3:
     sel_const_vs = st.selectbox("Select Constituency", sorted(df["constituency"].unique()), key="vs_const")
     c_df = df[df["constituency"]==sel_const_vs].sort_values("total_votes", ascending=True).copy()
     c_df["share"]      = (c_df["total_votes"] / c_df["total_votes"].sum() * 100).round(1)
-    # Y-axis label: Candidate on line 1, Party on line 2
-    c_df["cand_label"] = c_df.apply(lambda r: f"{shorten(r['candidate'],28)}<br><sub>{shorten(r['party'],30)}</sub>", axis=1)
-    # Bar label: votes + share together
-    c_df["bar_text"]   = c_df.apply(lambda r: f"{r['total_votes']:,}  ({r['share']:.1f}%)", axis=1)
+    # Y-axis: Candidate name (full), Party below
+    c_df["cand_label"] = c_df.apply(lambda r: f"{r['candidate']}<br><i>{shorten(r['party'], 40)}</i>", axis=1)
+    # Bar label: votes + share
+    c_df["bar_text"]   = c_df.apply(lambda r: f"{r['total_votes']:,} ({r['share']:.1f}%)", axis=1)
 
     fig_cv = go.Figure()
-    colors3 = px.colors.qualitative.Bold
-    party_list = c_df["party"].unique()
-    pty_color  = {p: colors3[i % len(colors3)] for i, p in enumerate(party_list)}
+    colors3   = px.colors.qualitative.Bold
+    pty_color = {p: colors3[i % len(colors3)] for i, p in enumerate(c_df["party"].unique())}
+    max_votes = c_df["total_votes"].max()
 
     for _, row in c_df.iterrows():
+        # use auto position — Plotly picks inside/outside based on bar width
         fig_cv.add_trace(go.Bar(
             x=[row["total_votes"]],
             y=[row["cand_label"]],
             orientation="h",
             marker_color=pty_color.get(row["party"], "#888"),
             text=row["bar_text"],
-            textposition="outside",
+            textposition="auto",
             textfont=dict(size=14, color="#111111"),
+            insidetextfont=dict(size=14, color="#ffffff"),
             showlegend=False,
             hovertemplate=(
                 f"<b>{row['candidate']}</b><br>"
@@ -470,7 +472,10 @@ with tab3:
             ),
         ))
     fig_cv.update_layout(**hbar_layout(
-        len(c_df), left_margin=420, right_margin=280, title_x="Total Votes"
+        len(c_df),
+        left_margin=440,
+        right_margin=40,
+        title_x="Total Votes",
     ))
     st.plotly_chart(fig_cv, use_container_width=True)
 
