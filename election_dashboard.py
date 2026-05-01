@@ -489,26 +489,30 @@ with tab4:
     cand_df     = df[df["constituency"]==sel_const].sort_values("total_votes", ascending=True).copy()
     winner_name = cand_df.iloc[-1]["candidate"]
 
+    cand_df["share"] = (cand_df["total_votes"] / cand_df["total_votes"].sum() * 100).round(1)
+
     fig_cand = go.Figure()
     for _, row in cand_df.iterrows():
         is_w  = row["candidate"] == winner_name
-        label = f"{'🏆 ' if is_w else ''}{shorten(row['candidate'],24)} | {shorten(row['party'],30)}"
+        # Two-line Y-axis: candidate on top, party below
+        label = f"{'🏆 ' if is_w else ''}{row['candidate']}<br><i>{shorten(row['party'], 40)}</i>"
         fig_cand.add_trace(go.Bar(
             x=[row["total_votes"]],
             y=[label],
             orientation="h",
             marker_color="#f59e0b" if is_w else "#1a1a2e",
-            text=f"{row['total_votes']:,}",
-            textposition="outside",
-            textfont=dict(size=15, color="#111111"),
+            text=f"{row['total_votes']:,} ({row['share']:.1f}%)",
+            textposition="auto",
+            textfont=dict(size=14, color="#111111"),
+            insidetextfont=dict(size=14, color="#ffffff"),
             showlegend=False,
             hovertemplate=(
                 f"<b>{row['candidate']}</b><br>Party: {row['party']}<br>"
                 f"EVM: {row['evm_votes']:,}<br>Postal: {row['postal_votes']:,}<br>"
-                f"Total: {row['total_votes']:,}<extra></extra>"
+                f"Total: {row['total_votes']:,} ({row['share']:.1f}%)<extra></extra>"
             ),
         ))
-    fig_cand.update_layout(**hbar_layout(len(cand_df), left_margin=380, right_margin=220, title_x="Total Votes"))
+    fig_cand.update_layout(**hbar_layout(len(cand_df), left_margin=440, right_margin=40, title_x="Total Votes"))
     st.plotly_chart(fig_cand, use_container_width=True)
 
     total_c = cand_df["total_votes"].sum()
