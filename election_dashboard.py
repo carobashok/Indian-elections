@@ -474,7 +474,7 @@ with tab4:
     fig_cand = go.Figure()
     for _, row in cand_df.iterrows():
         is_w  = row["candidate"] == winner_name
-        label = f"{'🏆 ' if is_w else ''}{shorten(row['candidate'],22)} | {shorten(row['party'],22)}"
+        label = f"{'🏆 ' if is_w else ''}{shorten(row['candidate'],24)} | {shorten(row['party'],30)}"
         fig_cand.add_trace(go.Bar(
             x=[row["total_votes"]],
             y=[label],
@@ -490,7 +490,7 @@ with tab4:
                 f"Total: {row['total_votes']:,}<extra></extra>"
             ),
         ))
-    fig_cand.update_layout(**hbar_layout(len(cand_df), left_margin=320, right_margin=180, title_x="Total Votes"))
+    fig_cand.update_layout(**hbar_layout(len(cand_df), left_margin=380, right_margin=220, title_x="Total Votes"))
     st.plotly_chart(fig_cand, use_container_width=True)
 
     total_c = cand_df["total_votes"].sum()
