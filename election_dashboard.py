@@ -473,11 +473,16 @@ with tab2:
         if not const_map.empty:
             const_map["constituency_key"] = const_map["constituency"].str.strip().str.upper()
             const_map = const_map.rename(columns={"alliance_name":"alliance_const"})
+            # merge on party + constituency_key to correctly assign
+            # specific Independent candidates to their alliances
             adf = adf.merge(
                 const_map[["alliance_const","party","constituency_key"]],
-                on=["party","constituency_key"], how="left"
+                on=["party","constituency_key"], how="left",
+                suffixes=("","_drop")
             )
-            adf["alliance_name"] = adf["alliance_const"].combine_first(adf["alliance_name"])
+            # override alliance_name only where const match found
+            mask = adf["alliance_const"].notna()
+            adf.loc[mask, "alliance_name"] = adf.loc[mask, "alliance_const"]
             adf = adf.drop(columns=["alliance_const"])
 
         adf = adf.drop(columns=["constituency_key"])
