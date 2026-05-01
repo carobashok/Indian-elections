@@ -230,7 +230,7 @@ with st.sidebar:
 
         # ── Alliance Upload ────────────────────────────────────────────────────
         st.markdown("#### 🤝 Upload Alliance Data")
-        st.caption("Expected columns: Alliance, Party, Election Year, Election, State (leave blank for national)")
+        st.caption("Expected columns: Alliance, Party, Election Year, Election, State, Constituency (last two optional — leave blank for national/party-level)")
 
         alliance_file = st.file_uploader(
             "Upload Alliance Excel (.xlsx)",
@@ -241,39 +241,45 @@ with st.sidebar:
         if alliance_file:
             try:
                 al = pd.read_excel(alliance_file)
-                required_al = ["Alliance", "Party", "Election Year", "Election", "State"]
+                required_al = ["Alliance", "Party", "Election Year", "Election"]
                 missing_al  = [c for c in required_al if c not in al.columns]
 
                 if missing_al:
                     st.error(f"Missing columns: {', '.join(missing_al)}")
                 else:
-                    al = al[required_al].copy()
-                    al.columns = ["alliance_name", "party", "election_year", "election", "state"]
+                    # Add optional columns if missing
+                    if "State"        not in al.columns: al["State"]        = None
+                    if "Constituency" not in al.columns: al["Constituency"] = None
+
+                    al = al[["Alliance","Party","Election Year","Election","State","Constituency"]].copy()
+                    al.columns = ["alliance_name","party","election_year","election","state","constituency"]
                     al["alliance_name"] = al["alliance_name"].astype(str).str.strip()
                     al["party"]         = al["party"].astype(str).str.strip()
                     al["election"]      = al["election"].astype(str).str.strip()
                     al["election_year"] = pd.to_numeric(al["election_year"], errors="coerce").fillna(0).astype(int)
-                    # state: blank/NaN = None (national)
-                    al["state"] = al["state"].apply(lambda x: None if pd.isna(x) or str(x).strip() == "" else str(x).strip())
+                    # state & constituency: blank/NaN = None
+                    for col in ["state","constituency"]:
+                        al[col] = al[col].apply(lambda x: None if pd.isna(x) or str(x).strip() == "" else str(x).strip())
 
                     st.markdown(f"**{len(al)} rows** found — **{al['alliance_name'].nunique()}** alliance(s), **{al['party'].nunique()}** party(ies)")
 
                     # Check duplicates
                     with st.spinner("Checking for duplicates..."):
-                        ex_resp = get_client().table("alliances")                             .select("alliance_name,party,election_year,election,state")                             .execute()
+                        ex_resp = get_client().table("alliances")                             .select("alliance_name,party,election_year,election,state,constituency")                             .execute()
                         ex_al = pd.DataFrame(ex_resp.data)
 
                     if not ex_al.empty:
-                        ex_al["state"] = ex_al["state"].apply(lambda x: None if pd.isna(x) or x is None else str(x).strip())
+                        for col in ["state","constituency"]:
+                            ex_al[col] = ex_al[col].apply(lambda x: None if pd.isna(x) or x is None else str(x).strip())
                         ex_keys = set(zip(ex_al["alliance_name"], ex_al["party"],
                                          ex_al["election_year"], ex_al["election"],
-                                         ex_al["state"].astype(str)))
+                                         ex_al["state"].astype(str), ex_al["constituency"].astype(str)))
                     else:
                         ex_keys = set()
 
                     al["_key"] = list(zip(al["alliance_name"], al["party"],
                                           al["election_year"], al["election"],
-                                          al["state"].astype(str)))
+                                          al["state"].astype(str), al["constituency"].astype(str)))
                     new_al  = al[~al["_key"].isin(ex_keys)].drop(columns=["_key"])
                     dup_al  = al[ al["_key"].isin(ex_keys)].drop(columns=["_key"])
 
@@ -294,6 +300,8 @@ with st.sidebar:
                                     for r in records:
                                         if r["state"] == "None" or r["state"] is None:
                                             r["state"] = None
+                                        if r.get("constituency") == "None" or r.get("constituency") is None:
+                                            r["constituency"] = None
                                     batch_size = 100
                                     inserted   = 0
                                     for i in range(0, len(records), batch_size):
@@ -405,31 +413,39 @@ with tab2:
     @st.cache_data(ttl=300)
     def load_alliances(year, election, state):
         client = get_client()
-        # fetch national mappings (state IS NULL)
-        nat = client.table("alliances").select("*")             .eq("election_year", year).eq("election", election)             .is_("state", "null").execute()
-        nat_df = pd.DataFrame(nat.data)
 
-        # fetch state-specific mappings
-        if state and state != "All States":
-            st8 = client.table("alliances").select("*")                 .eq("election_year", year).eq("election", election)                 .eq("state", state).execute()
-            st8_df = pd.DataFrame(st8.data)
-        else:
-            st8_df = pd.DataFrame()
+        # Fetch ALL alliance rows for this year + election in one call
+        resp = client.table("alliances").select("*")             .eq("election_year", year).eq("election", election).execute()
+        all_df = pd.DataFrame(resp.data)
 
-        if nat_df.empty and st8_df.empty:
+        if all_df.empty:
             return pd.DataFrame()
 
-        # state-specific overrides national for same party
-        if not st8_df.empty and not nat_df.empty:
-            override_parties = st8_df["party"].unique()
-            nat_df = nat_df[~nat_df["party"].isin(override_parties)]
-            combined = pd.concat([nat_df, st8_df], ignore_index=True)
-        elif not st8_df.empty:
-            combined = st8_df
-        else:
-            combined = nat_df
+        # Ensure constituency column exists
+        if "constituency" not in all_df.columns:
+            all_df["constituency"] = None
 
-        return combined[["alliance_name", "party"]].drop_duplicates()
+        # Separate by specificity
+        const_df = all_df[all_df["constituency"].notna()].copy()
+        nat_df   = all_df[all_df["state"].isna() & all_df["constituency"].isna()].copy()
+
+        if state and state != "All States":
+            state_df = all_df[(all_df["state"]==state) & all_df["constituency"].isna()].copy()
+        else:
+            state_df = pd.DataFrame()
+
+        # Build final map: national → overridden by state → overridden by constituency
+        final = nat_df[["alliance_name","party","constituency"]].copy()
+
+        if not state_df.empty:
+            override_parties = state_df["party"].unique()
+            final = final[~final["party"].isin(override_parties)]
+            final = pd.concat([final, state_df[["alliance_name","party","constituency"]]], ignore_index=True)
+
+        if not const_df.empty:
+            final = pd.concat([final, const_df[["alliance_name","party","constituency"]]], ignore_index=True)
+
+        return final.drop_duplicates()
 
     alliance_map = load_alliances(sel_year, sel_election, sel_state)
 
@@ -438,7 +454,21 @@ with tab2:
     else:
         # ── Merge alliance into main df ────────────────────────────────────────
         adf = df.copy()
-        adf = adf.merge(alliance_map, on="party", how="left")
+
+        # Split alliance_map into constituency-specific and party-level
+        const_map = alliance_map[alliance_map["constituency"].notna()].copy()
+        party_map = alliance_map[alliance_map["constituency"].isna()][["alliance_name","party"]].copy()
+
+        # First apply party-level mapping
+        adf = adf.merge(party_map, on="party", how="left")
+
+        # Then override with constituency-specific mapping where applicable
+        if not const_map.empty:
+            const_map = const_map.rename(columns={"alliance_name":"alliance_const"})
+            adf = adf.merge(const_map[["alliance_const","party","constituency"]], on=["party","constituency"], how="left")
+            adf["alliance_name"] = adf["alliance_const"].combine_first(adf["alliance_name"])
+            adf = adf.drop(columns=["alliance_const"])
+
         adf["alliance_name"] = adf["alliance_name"].fillna("Others / Unallied")
 
         # ── Winners with alliance ──────────────────────────────────────────────
