@@ -210,7 +210,9 @@ with st.sidebar:
                         if st.button("✅ Confirm & Insert New Rows", type="primary"):
                             with st.spinner(f"Inserting {len(new_rows)} rows..."):
                                 try:
-                                    records = new_rows.drop(columns=["total_votes"], errors="ignore").to_dict(orient="records")
+                                    clean = new_rows.drop(columns=["total_votes"], errors="ignore")
+                                    clean = clean.where(pd.notnull(clean), None)
+                                    records = clean.to_dict(orient="records")
                                     # Insert in batches of 100
                                     batch_size = 100
                                     inserted = 0
@@ -250,6 +252,9 @@ with st.sidebar:
                     # Add optional columns if missing
                     if "State"        not in al.columns: al["State"]        = None
                     if "Constituency" not in al.columns: al["Constituency"] = None
+                    # Ensure object dtype to avoid NaN float issues
+                    al["State"]        = al["State"].astype(object)
+                    al["Constituency"] = al["Constituency"].astype(object)
 
                     al = al[["Alliance","Party","Election Year","Election","State","Constituency"]].copy()
                     al.columns = ["alliance_name","party","election_year","election","state","constituency"]
