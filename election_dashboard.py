@@ -995,7 +995,13 @@ Rules:
 - Always use lowercase column names
 - Use ILIKE for case-insensitive text matching
 - Limit results to 50 rows unless the question asks for a specific count/aggregate
-- For winner queries use: ROW_NUMBER() OVER (PARTITION BY constituency, state, election_year, election ORDER BY total_votes DESC) = 1
+- NEVER use window functions (like ROW_NUMBER()) directly in a WHERE clause — always wrap in a subquery or CTE
+- For winner queries, use this CTE pattern:
+  WITH ranked AS (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY constituency, state, election_year, election ORDER BY total_votes DESC) AS rn
+    FROM election_results
+  )
+  SELECT ... FROM ranked WHERE rn = 1
 - Never use total_votes in INSERT/UPDATE — it is a generated column
 - Always include meaningful column aliases for readability"""
 
