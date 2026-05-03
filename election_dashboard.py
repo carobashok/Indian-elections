@@ -367,7 +367,7 @@ kpi(c4,"Total Votes",    f"{total_votes/1_00_000:.2f}L",  "lakh votes polled")
 kpi(c5,"Leading Party",  str(seats_leading),              f"seats · {shorten(leading_party,20)}")
 st.divider()
 
-tab1,tab2,tab3,tab4,tab5,tab6 = st.tabs(["🏆  Winners Board","🤝  Alliance View","🎯  Party Performance","🥧  Vote Share","👤  Candidate Comparison","ℹ️  About"])
+tab1,tab2,tab3,tab4,tab5,tab6,tab7 = st.tabs(["🏆  Winners Board","🤝  Alliance View","🎯  Party Performance","🥧  Vote Share","👤  Candidate Comparison","💬  Ask Data","ℹ️  About"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 · Winners Board
@@ -849,7 +849,7 @@ with tab5:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 6 · About
 # ══════════════════════════════════════════════════════════════════════════════
-with tab6:
+with tab7:
     @st.cache_data(ttl=600)
     def load_elections_list():
         resp = get_client().table("election_results").select("election_year,state,election").execute()
@@ -943,3 +943,100 @@ with tab6:
   </div>
 </div>"""
         st.markdown(about_html, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 6 · Ask Data
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 6 · Ask Data
+# ══════════════════════════════════════════════════════════════════════════════
+with tab6:
+    st.markdown('<div class="section-title">Ask About This Election</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<p style="color:#9ca3af;font-size:14px;margin-bottom:1.5rem;">'
+        'Ask any question about the election data currently loaded. For example: '
+        '<i>"Which party won the most seats?", "Who won in Agiaon?", '
+        '"What was the winning margin in Patna Sahib?", '
+        '"Which constituency had the closest contest?"</i></p>',
+        unsafe_allow_html=True,
+    )
+
+    def build_context(df, winners_df):
+        return f"""You are analyzing Indian election results. 
+Current filter: {sel_election} | {sel_year} | {sel_state}
+
+WINNERS (constituency, candidate, party, total_votes, margin):
+{winners_df.to_string(index=False, max_rows=300)}
+
+ALL CANDIDATES (constituency, candidate, party, total_votes, evm_votes, postal_votes):
+{df[["constituency","candidate","party","total_votes","evm_votes","postal_votes"]].to_string(index=False, max_rows=600)}
+
+Rules:
+- Answer ONLY from the data above
+- Be concise and clear
+- Format numbers with commas
+- If question cannot be answered from data, say so
+- Never make up information"""
+
+    question = st.text_input(
+        "Your question",
+        placeholder="e.g. Which party won the most seats?",
+        key="ask_data_q",
+    )
+
+    col_a, col_b = st.columns([1, 6])
+    ask_btn   = col_a.button("Ask", type="primary", use_container_width=True)
+    clear_btn = col_b.button("Clear history")
+
+    if clear_btn:
+        st.session_state.pop("ask_history", None)
+        st.rerun()
+
+    if "ask_history" not in st.session_state:
+        st.session_state["ask_history"] = []
+
+    if ask_btn and question.strip():
+        with st.spinner("Thinking..."):
+            try:
+                import anthropic as ac
+                ai = ac.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+                ctx = build_context(df, winners_df)
+
+                msgs = []
+                for q, a in st.session_state["ask_history"]:
+                    msgs.append({"role": "user",      "content": q})
+                    msgs.append({"role": "assistant", "content": a})
+                msgs.append({"role": "user", "content": question})
+
+                resp   = ai.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=1000,
+                    system=ctx,
+                    messages=msgs,
+                )
+                answer = resp.content[0].text
+                st.session_state["ask_history"].append((question, answer))
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+    if st.session_state.get("ask_history"):
+        for q, a in reversed(st.session_state["ask_history"]):
+            st.markdown(
+                f'<div style="background:rgba(245,158,11,0.08);border-left:3px solid #f59e0b;'
+                f'border-radius:8px;padding:0.75rem 1rem;margin-bottom:0.5rem;">'
+                f'<div style="font-size:12px;font-weight:600;color:#f59e0b;margin-bottom:4px;">YOU</div>'
+                f'<div style="font-size:14px;color:#ffffff;">{q}</div></div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f'<div style="background:rgba(255,255,255,0.04);border-left:3px solid #378ADD;'
+                f'border-radius:8px;padding:0.75rem 1rem;margin-bottom:1.25rem;">'
+                f'<div style="font-size:12px;font-weight:600;color:#378ADD;margin-bottom:4px;">ANSWER</div>'
+                f'<div style="font-size:14px;color:#e5e7eb;line-height:1.7;">{a}</div></div>',
+                unsafe_allow_html=True,
+            )
+    else:
+        st.info("Ask a question above to get started!")
