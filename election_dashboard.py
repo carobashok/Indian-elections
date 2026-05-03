@@ -327,6 +327,66 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Error reading alliance file: {e}")
 
+        # ── Party Aliases Upload ──────────────────────────────────────────────────
+        st.markdown("#### 🏷️ Upload Party Short Names")
+        st.caption("Expected columns: Short Name, Full Name (e.g. BJP, Bharatiya Janata Party)")
+
+        alias_file = st.file_uploader("Upload Party Aliases (.xlsx)", type=["xlsx"], key="alias_upload")
+
+        if alias_file:
+            try:
+                al = pd.read_excel(alias_file)
+                required = ["Short Name", "Full Name"]
+                missing  = [c for c in required if c not in al.columns]
+
+                if missing:
+                    st.error(f"Missing columns: {', '.join(missing)}")
+                else:
+                    al = al[required].copy()
+                    al.columns = ["short_name", "full_name"]
+                    al["short_name"] = al["short_name"].astype(str).str.strip()
+                    al["full_name"]  = al["full_name"].astype(str).str.strip()
+                    al = al[al["short_name"].notna() & al["full_name"].notna()]
+
+                    st.markdown(f"**{len(al)} party aliases** found in file")
+
+                    # Check duplicates
+                    with st.spinner("Checking for duplicates..."):
+                        ex_resp = get_client().table("party_aliases").select("short_name").execute()
+                        ex_df   = pd.DataFrame(ex_resp.data)
+
+                    if not ex_df.empty:
+                        ex_keys = set(ex_df["short_name"].str.upper())
+                    else:
+                        ex_keys = set()
+
+                    new_al = al[~al["short_name"].str.upper().isin(ex_keys)]
+                    dup_al = al[ al["short_name"].str.upper().isin(ex_keys)]
+
+                    c1, c2 = st.columns(2)
+                    c1.metric("✅ New aliases to insert", len(new_al))
+                    c2.metric("⚠️ Duplicates (will skip)", len(dup_al))
+
+                    if len(dup_al) > 0:
+                        with st.expander("View duplicates"):
+                            st.dataframe(dup_al, hide_index=True)
+
+                    if len(new_al) > 0:
+                        if st.button("✅ Confirm & Insert Aliases", type="primary"):
+                            with st.spinner(f"Inserting {len(new_al)} aliases..."):
+                                try:
+                                    records = new_al.where(pd.notnull(new_al), None).to_dict(orient="records")
+                                    get_client().table("party_aliases").insert(records).execute()
+                                    st.success(f"✅ Successfully inserted {len(new_al)} party aliases!")
+                                    st.cache_data.clear()
+                                except Exception as e:
+                                    st.error(f"Insert failed: {e}")
+                    else:
+                        st.info("No new aliases to insert.")
+
+            except Exception as e:
+                st.error(f"Error reading file: {e}")
+
     elif admin_key and admin_key != st.secrets.get("ADMIN_PASSWORD", st.secrets.get("admin", {}).get("ADMIN_PASSWORD", "")):
         st.error("Incorrect key")
 
@@ -964,6 +1024,22 @@ with tab6:
         unsafe_allow_html=True,
     )
 
+    # ── Load party aliases ────────────────────────────────────────────────────
+    @st.cache_data(ttl=300)
+    def load_party_aliases():
+        resp = get_client().table("party_aliases").select("short_name,full_name").execute()
+        return pd.DataFrame(resp.data) if resp.data else pd.DataFrame()
+
+    aliases_df = load_party_aliases()
+    if not aliases_df.empty:
+        alias_str = "\n".join(
+            f"  {row['short_name']} = {row['full_name']}"
+            for _, row in aliases_df.iterrows()
+        )
+        ALIAS_CONTEXT = f"\n\nParty Short Name Aliases (use full name in SQL queries):\n{alias_str}"
+    else:
+        ALIAS_CONTEXT = ""
+
     # ── Schema context for SQL generation ─────────────────────────────────────
     DB_SCHEMA = """
 Table: election_results
@@ -988,7 +1064,7 @@ Notes:
 
     SQL_SYSTEM = f"""You are a PostgreSQL expert. Generate a single valid SQL SELECT query to answer the user's question.
 The database has this schema:
-{DB_SCHEMA}
+{DB_SCHEMA}{ALIAS_CONTEXT}
 
 Rules:
 - Return ONLY the SQL query, nothing else — no explanation, no markdown, no backticks
