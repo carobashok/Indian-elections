@@ -1068,6 +1068,9 @@ Format numbers with commas. Be direct and factual. Keep it brief."""
     # ── Display history ────────────────────────────────────────────────────────
     if st.session_state.get("ask_history"):
         for item in reversed(st.session_state["ask_history"]):
+            # Handle both old (2-tuple) and new (4-tuple) history formats
+            if len(item) == 2:
+                continue  # skip old format entries
             q, sql_q, res_df, ans = item
             st.markdown(
                 f'<div style="background:rgba(245,158,11,0.08);border-left:3px solid #f59e0b;' +
