@@ -897,16 +897,20 @@ with tab6:
       <div style="font-size:12px;color:#9ca3af;">AI &amp; Analytics &middot; Chennai, India</div>
     </div>
   </div>
+  <p style="font-size:13px;color:#9ca3af;line-height:1.7;margin:0 0 0.75rem;font-style:italic;border-left:3px solid #f59e0b;padding-left:10px;">
+    We believe every dataset has a story.
+  </p>
   <p style="font-size:13px;color:#9ca3af;line-height:1.7;margin:0 0 0.75rem;">
-    This dashboard brings Indian election results to life through data &mdash; covering constituency-wise results,
-    alliance performance, party analytics, and candidate comparisons across states and years.
+    Carob Technologies transforms data &mdash; in any format, from any domain &mdash; into clear, actionable insights
+    through intelligent analytics and AI-powered applications.
   </p>
   <p style="font-size:13px;color:#9ca3af;line-height:1.7;margin:0 0 1.25rem;">
-    Built to make complex election data accessible, explorable, and insightful for analysts,
-    researchers, and anyone curious about Indian democracy.
+    This election dashboard is built for the curious citizen, not the election expert. A simple, accessible way
+    to explore results, understand how parties performed, and see who won where &mdash; without needing to dig
+    through spreadsheets or news reports.
   </p>
   <div style="border-top:0.5px solid rgba(255,255,255,0.1);padding-top:1rem;">
-    <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Tech Stack</div>
+    <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Built with</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;">
       <span style="font-size:12px;padding:3px 10px;border-radius:6px;border:0.5px solid rgba(255,255,255,0.15);color:#cbd5e1;">Python</span>
       <span style="font-size:12px;padding:3px 10px;border-radius:6px;border:0.5px solid rgba(255,255,255,0.15);color:#cbd5e1;">Streamlit</span>
