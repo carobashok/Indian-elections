@@ -20,15 +20,13 @@ BAR_HEIGHT = 70   # px per bar row
 
 def hbar_layout(n_bars, left_margin=260, right_margin=140, title_x="", title_y="", **kw):
     """Standard layout for every horizontal bar chart."""
-    # Force minimum bar thickness: each bar gets at least 30px, cap total height at 2000px
-    bar_h    = max(30, min(60, 600 // max(n_bars, 1)))
-    total_h  = min(2000, max(420, n_bars * bar_h + 100))
+    total_h = min(2000, max(420, n_bars * 55 + 100))
     d = dict(
         font=FONT,
         plot_bgcolor="white",
         paper_bgcolor="white",
         height=total_h,
-        bargap=max(0.1, 1 - (bar_h / (bar_h + 10))),   # tighter gap when many bars
+        bargap=0.25,
         margin=dict(l=left_margin, r=right_margin, t=50, b=40),
         xaxis=dict(
             showgrid=True, gridcolor=GRID_COLOR,
@@ -618,21 +616,21 @@ with tab3:
     )
     seats["label"] = seats["party"].apply(lambda p: shorten(p, 32))
 
-    fig_s = go.Figure()
-    colors = px.colors.qualitative.Bold
-    for i, (_, row) in enumerate(seats.iterrows()):
-        fig_s.add_trace(go.Bar(
-            x=[row["seats"]],
-            y=[row["label"]],
-            orientation="h",
-            marker_color=colors[i % len(colors)],
-            text=str(row["seats"]),
-            textposition="outside",
-            textfont=dict(size=16, color="#1a1a2e"),
-            showlegend=False,
-            hovertemplate=f"<b>{row['party']}</b><br>Seats: {row['seats']}<extra></extra>",
-        ))
-    fig_s.update_layout(**hbar_layout(len(seats), left_margin=280, right_margin=80, title_x="Seats Won"))
+    # Single trace — renders proper thick bars unlike one-trace-per-bar approach
+    fig_s = px.bar(
+        seats, x="seats", y="label", orientation="h",
+        color="label", text="seats",
+        color_discrete_sequence=px.colors.qualitative.Bold,
+        custom_data=["party"],
+    )
+    fig_s.update_traces(
+        textposition="outside",
+        textfont=dict(size=15, color="#1a1a2e"),
+        hovertemplate="<b>%{customdata[0]}</b><br>Seats: %{x}<extra></extra>",
+    )
+    fig_s.update_layout(**hbar_layout(len(seats), left_margin=280, right_margin=80, title_x="Seats Won"),
+        showlegend=False,
+    )
     st.plotly_chart(fig_s, use_container_width=True)
 
     # Total votes
@@ -647,20 +645,20 @@ with tab3:
     pv["text_label"] = pv["total_votes"].apply(lambda x: f"{x/1_00_000:.2f}L")
 
     fig_v = go.Figure()
-    colors2 = px.colors.qualitative.Safe
-    for i, (_, row) in enumerate(pv.iterrows()):
-        fig_v.add_trace(go.Bar(
-            x=[row["total_votes"]],
-            y=[row["label"]],
-            orientation="h",
-            marker_color=colors2[i % len(colors2)],
-            text=row["text_label"],
-            textposition="outside",
-            textfont=dict(size=15, color="#1a1a2e"),
-            showlegend=False,
-            hovertemplate=f"<b>{row['party']}</b><br>Votes: {row['total_votes']:,}<br>Share: {row['vote_share']:.2f}%<extra></extra>",
-        ))
-    fig_v.update_layout(**hbar_layout(len(pv), left_margin=280, right_margin=100, title_x="Total Votes"))
+    fig_v = px.bar(
+        pv, x="total_votes", y="label", orientation="h",
+        color="label", text="text_label",
+        color_discrete_sequence=px.colors.qualitative.Safe,
+        custom_data=["party","vote_share"],
+    )
+    fig_v.update_traces(
+        textposition="outside",
+        textfont=dict(size=15, color="#1a1a2e"),
+        hovertemplate="<b>%{customdata[0]}</b><br>Votes: %{x:,}<br>Share: %{customdata[1]:.2f}%<extra></extra>",
+    )
+    fig_v.update_layout(**hbar_layout(len(pv), left_margin=280, right_margin=100, title_x="Total Votes"),
+        showlegend=False,
+    )
     st.plotly_chart(fig_v, use_container_width=True)
 
     # Summary table
