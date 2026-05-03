@@ -628,9 +628,9 @@ with tab3:
         textfont=dict(size=15, color="#1a1a2e"),
         hovertemplate="<b>%{customdata[0]}</b><br>Seats: %{x}<extra></extra>",
     )
-    fig_s.update_layout(**hbar_layout(len(seats), left_margin=280, right_margin=80, title_x="Seats Won"),
-        showlegend=False,
-    )
+    layout_s = hbar_layout(len(seats), left_margin=280, right_margin=80, title_x="Seats Won")
+    layout_s["showlegend"] = False
+    fig_s.update_layout(**layout_s)
     st.plotly_chart(fig_s, use_container_width=True)
 
     # Total votes
@@ -656,9 +656,9 @@ with tab3:
         textfont=dict(size=15, color="#1a1a2e"),
         hovertemplate="<b>%{customdata[0]}</b><br>Votes: %{x:,}<br>Share: %{customdata[1]:.2f}%<extra></extra>",
     )
-    fig_v.update_layout(**hbar_layout(len(pv), left_margin=280, right_margin=100, title_x="Total Votes"),
-        showlegend=False,
-    )
+    layout_v = hbar_layout(len(pv), left_margin=280, right_margin=100, title_x="Total Votes")
+    layout_v["showlegend"] = False
+    fig_v.update_layout(**layout_v)
     st.plotly_chart(fig_v, use_container_width=True)
 
     # Summary table
