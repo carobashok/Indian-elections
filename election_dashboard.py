@@ -1125,12 +1125,20 @@ Important rules for analysis:
                 import anthropic as ac
                 ai = ac.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
 
-                # Step 1 — Generate SQL
+                # Step 1 — Pre-process question: replace short names with full names
+                processed_q = question
+                if not aliases_df.empty:
+                    for _, row in aliases_df.iterrows():
+                        import re
+                        pattern = r'\b' + re.escape(row["short_name"]) + r'\b'
+                        processed_q = re.sub(pattern, row["full_name"], processed_q, flags=re.IGNORECASE)
+
+                # Step 2 — Generate SQL
                 sql_resp = ai.messages.create(
                     model="claude-sonnet-4-20250514",
                     max_tokens=500,
                     system=SQL_SYSTEM,
-                    messages=[{"role":"user","content": question}],
+                    messages=[{"role":"user","content": processed_q}],
                 )
                 sql_query = sql_resp.content[0].text.strip().rstrip(";").strip()
 
