@@ -20,11 +20,15 @@ BAR_HEIGHT = 70   # px per bar row
 
 def hbar_layout(n_bars, left_margin=260, right_margin=140, title_x="", title_y="", **kw):
     """Standard layout for every horizontal bar chart."""
+    # Force minimum bar thickness: each bar gets at least 30px, cap total height at 2000px
+    bar_h    = max(30, min(60, 600 // max(n_bars, 1)))
+    total_h  = min(2000, max(420, n_bars * bar_h + 100))
     d = dict(
         font=FONT,
         plot_bgcolor="white",
         paper_bgcolor="white",
-        height=max(420, n_bars * BAR_HEIGHT),
+        height=total_h,
+        bargap=max(0.1, 1 - (bar_h / (bar_h + 10))),   # tighter gap when many bars
         margin=dict(l=left_margin, r=right_margin, t=50, b=40),
         xaxis=dict(
             showgrid=True, gridcolor=GRID_COLOR,
