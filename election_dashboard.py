@@ -349,7 +349,7 @@ seats_leading  = int(seats_by_party.max())
 # ── Header ─────────────────────────────────────────────────────────────────────
 st.markdown(
     f'<div class="main-header">🗳️ {sel_election} · {sel_year} · {sel_state}</div>'
-    f'<div class="sub-header">Live results · Supabase · election_results</div>',
+    f'<div class="sub-header">Election Results</div>',
     unsafe_allow_html=True,
 )
 
@@ -369,7 +369,7 @@ kpi(c4,"Total Votes",    f"{total_votes/1_00_000:.2f}L",  "lakh votes polled")
 kpi(c5,"Leading Party",  str(seats_leading),              f"seats · {shorten(leading_party,20)}")
 st.divider()
 
-tab1,tab2,tab3,tab4,tab5 = st.tabs(["🏆  Winners Board","🤝  Alliance View","🎯  Party Performance","🥧  Vote Share","👤  Candidate Comparison"])
+tab1,tab2,tab3,tab4,tab5,tab6 = st.tabs(["🏆  Winners Board","🤝  Alliance View","🎯  Party Performance","🥧  Vote Share","👤  Candidate Comparison","ℹ️  About"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 · Winners Board
@@ -822,3 +822,67 @@ with tab5:
     m1.metric("🏆 Winner",         w_row["candidate"],  w_row["party"])
     m2.metric("📊 Winning Margin", f"{margin:,} votes", f"{margin/total_c*100:.1f}% of total")
     m3.metric("🗳️ Total Votes",    f"{total_c:,}",      f"{len(cand_df)} candidates")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 6 · About
+# ══════════════════════════════════════════════════════════════════════════════
+with tab6:
+    @st.cache_data(ttl=600)
+    def load_elections_list():
+        resp = get_client().table("election_results").select("election_year,state,election").execute()
+        edf = pd.DataFrame(resp.data)
+        if not edf.empty:
+            edf["state"]    = edf["state"].str.strip()
+            edf["election"] = edf["election"].str.strip()
+            edf = edf.drop_duplicates().sort_values(["election_year","election","state"], ascending=[False,True,True])
+        return edf
+
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.markdown('<div class="section-title">Elections Available</div>', unsafe_allow_html=True)
+        el_list = load_elections_list()
+        if not el_list.empty:
+            def state_label(row):
+                if "lok sabha" in row["election"].lower():
+                    return "All States"
+                return row["state"]
+            el_list["State"] = el_list.apply(state_label, axis=1)
+            el_list = el_list.drop_duplicates(subset=["election_year","election","State"])
+            el_list = el_list.rename(columns={"election_year":"Year","election":"Election"})[["Election","Year","State"]]
+            st.dataframe(el_list, use_container_width=True, hide_index=True, height=min(400, 40 + len(el_list) * 35))
+        else:
+            st.info("No elections loaded yet.")
+
+    with col_right:
+        st.markdown('<div class="section-title">About</div>', unsafe_allow_html=True)
+        about_html = """
+<div style="border-radius:12px;padding:1.25rem;border:0.5px solid rgba(255,255,255,0.12);">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:1rem;">
+    <div style="width:40px;height:40px;border-radius:8px;background:#1a1a2e;display:flex;align-items:center;justify-content:center;color:#f59e0b;font-weight:700;font-size:13px;">CT</div>
+    <div>
+      <div style="font-size:15px;font-weight:600;color:#ffffff;">Carob Technologies</div>
+      <div style="font-size:12px;color:#9ca3af;">AI &amp; Analytics &middot; Chennai, India</div>
+    </div>
+  </div>
+  <p style="font-size:13px;color:#9ca3af;line-height:1.7;margin:0 0 0.75rem;">
+    This dashboard brings Indian election results to life through data &mdash; covering constituency-wise results,
+    alliance performance, party analytics, and candidate comparisons across states and years.
+  </p>
+  <p style="font-size:13px;color:#9ca3af;line-height:1.7;margin:0 0 1.25rem;">
+    Built to make complex election data accessible, explorable, and insightful for analysts,
+    researchers, and anyone curious about Indian democracy.
+  </p>
+  <div style="border-top:0.5px solid rgba(255,255,255,0.1);padding-top:1rem;">
+    <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Tech Stack</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+      <span style="font-size:12px;padding:3px 10px;border-radius:6px;border:0.5px solid rgba(255,255,255,0.15);color:#cbd5e1;">Python</span>
+      <span style="font-size:12px;padding:3px 10px;border-radius:6px;border:0.5px solid rgba(255,255,255,0.15);color:#cbd5e1;">Streamlit</span>
+      <span style="font-size:12px;padding:3px 10px;border-radius:6px;border:0.5px solid rgba(255,255,255,0.15);color:#cbd5e1;">Plotly</span>
+      <span style="font-size:12px;padding:3px 10px;border-radius:6px;border:0.5px solid rgba(255,255,255,0.15);color:#cbd5e1;">Supabase</span>
+      <span style="font-size:12px;padding:3px 10px;border-radius:6px;border:0.5px solid rgba(255,255,255,0.15);color:#cbd5e1;">PostgreSQL</span>
+    </div>
+  </div>
+</div>"""
+        st.markdown(about_html, unsafe_allow_html=True)
