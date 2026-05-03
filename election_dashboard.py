@@ -1003,12 +1003,21 @@ Rules:
   )
   SELECT ... FROM ranked WHERE rn = 1
 - Never use total_votes in INSERT/UPDATE — it is a generated column
-- Always include meaningful column aliases for readability"""
+- Always include meaningful column aliases for readability
+- When counting seats won by a party per state, also include total constituencies in that state as a separate column so win % can be calculated
+  Example: SELECT state, COUNT(*) FILTER (WHERE rn=1 AND party ILIKE '%BJP%') as seats_won, COUNT(DISTINCT constituency) as total_seats FROM ..."""
 
     ANSWER_SYSTEM = """You are an Indian election data analyst. 
 You are given a user question and the SQL query result as a data table.
 Explain the result clearly and concisely in plain English.
-Format numbers with commas. Be direct and factual. Keep it brief."""
+Format numbers with commas. Be direct and factual. Keep it brief.
+
+Important rules for analysis:
+- NEVER categorize performance based on raw seat numbers alone
+- If the data includes total seats or total constituencies for a state, always calculate win % = seats won / total seats * 100
+- Base any performance categorization (strong/moderate/limited) on win % not raw count
+- If total seats are not in the data, do not categorize — just report the numbers
+- Always mention both seats won AND win % when total seats are available"""
 
     # ── Check if admin is logged in ────────────────────────────────────────────
     is_admin_ask = (
