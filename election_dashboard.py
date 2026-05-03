@@ -628,7 +628,9 @@ with tab3:
             showlegend=False,
             hovertemplate=f"<b>{row['party']}</b><br>Seats: {row['seats']}<extra></extra>",
         ))
-    fig_s.update_layout(**hbar_layout(len(seats), left_margin=280, right_margin=80, title_x="Seats Won"))
+    fig_s.update_layout(**hbar_layout(len(seats), left_margin=280, right_margin=80, title_x="Seats Won"),
+        **{"bargap": 0.3, "bargroupgap": 0.1}
+    )
     st.plotly_chart(fig_s, use_container_width=True)
 
     # Total votes
