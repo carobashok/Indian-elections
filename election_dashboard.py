@@ -948,10 +948,11 @@ with tab6:
         st.stop()
 
     # ── Sub-tabs ───────────────────────────────────────────────────────────────
-    ctab1, ctab2, ctab3 = st.tabs([
+    ctab1, ctab2, ctab3, ctab4 = st.tabs([
         f"🏛️ Party Seats  {cmp_year_a} vs {cmp_year_b}",
         f"📊 Vote Share Swing  {cmp_year_a} vs {cmp_year_b}",
         f"🤝 Alliance  {cmp_year_a} vs {cmp_year_b}",
+        f"📍 Constituency  {cmp_year_a} vs {cmp_year_b}",
     ])
 
     # ── Helper: compute winners ────────────────────────────────────────────────
@@ -1273,6 +1274,196 @@ with tab6:
                 )
             else:
                 st.success("No party alliance changes detected between the two years.")
+
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # Compare Sub-tab 4 · Constituency Analysis
+    # ══════════════════════════════════════════════════════════════════════════
+    with ctab4:
+
+        # ── Build constituency comparison df ──────────────────────────────────
+        const_a = winners_a[["constituency","candidate","party","total_votes"]].copy()
+        const_b = winners_b[["constituency","candidate","party","total_votes"]].copy()
+        const_a.columns = ["constituency", f"winner_{cmp_year_a}", f"party_{cmp_year_a}", f"votes_{cmp_year_a}"]
+        const_b.columns = ["constituency", f"winner_{cmp_year_b}", f"party_{cmp_year_b}", f"votes_{cmp_year_b}"]
+
+        const_cmp = const_a.merge(const_b, on="constituency", how="outer")
+
+        # Party-level result
+        def party_result(row):
+            pa = row.get(f"party_{cmp_year_a}", None)
+            pb = row.get(f"party_{cmp_year_b}", None)
+            if pd.isna(pa) or pd.isna(pb): return "New/Missing"
+            return "Held" if pa == pb else "Flipped"
+
+        const_cmp["Party Result"] = const_cmp.apply(party_result, axis=1)
+
+        # Alliance-level result (if alliance data exists)
+        has_alliance = not amap_a.empty and not amap_b.empty
+
+        if has_alliance:
+            pm_a_map = party_alliance_map(amap_a)
+            pm_b_map = party_alliance_map(amap_b)
+
+            def alliance_result(row):
+                pa = row.get(f"party_{cmp_year_a}", None)
+                pb = row.get(f"party_{cmp_year_b}", None)
+                if pd.isna(pa) or pd.isna(pb): return "New/Missing"
+                al_a = pm_a_map.get(pa, "Others / Unallied")
+                al_b = pm_b_map.get(pb, "Others / Unallied")
+                return "Held" if al_a == al_b else "Flipped"
+
+            const_cmp["Alliance Result"] = const_cmp.apply(alliance_result, axis=1)
+
+        # ── Part A — KPI Summary ───────────────────────────────────────────────
+        st.markdown('<div class="section-title">Flip Summary</div>', unsafe_allow_html=True)
+
+        p_held    = (const_cmp["Party Result"] == "Held").sum()
+        p_flipped = (const_cmp["Party Result"] == "Flipped").sum()
+        p_new     = (const_cmp["Party Result"] == "New/Missing").sum()
+        total_c   = len(const_cmp)
+
+        kpi_cols = st.columns(4) if has_alliance else st.columns(3)
+        kpi(kpi_cols[0], "Total Constituencies", str(total_c), "in comparison")
+        kpi(kpi_cols[1], "Held (Party)",    str(p_held),    f"{p_held/total_c*100:.1f}% unchanged")
+        kpi(kpi_cols[2], "Flipped (Party)", str(p_flipped), f"{p_flipped/total_c*100:.1f}% changed hands")
+
+        if has_alliance:
+            al_held    = (const_cmp["Alliance Result"] == "Held").sum()
+            al_flipped = (const_cmp["Alliance Result"] == "Flipped").sum()
+            kpi(kpi_cols[3], "Held (Alliance)", str(al_held), f"{al_held/total_c*100:.1f}% same alliance")
+
+        st.divider()
+
+        # ── Part B — Flip Table ────────────────────────────────────────────────
+        st.markdown('<div class="section-title">Constituency-wise Results</div>', unsafe_allow_html=True)
+
+        # Filter
+        filter_opts = ["All", "Held", "Flipped", "New/Missing"]
+        sel_filter  = st.radio("Show", filter_opts, horizontal=True, key="flip_filter")
+
+        disp_const = const_cmp.copy()
+        if sel_filter != "All":
+            disp_const = disp_const[disp_const["Party Result"] == sel_filter]
+
+        disp_const = disp_const.sort_values("constituency").reset_index(drop=True)
+
+        # Rename columns nicely
+        col_rename = {
+            "constituency":         "Constituency",
+            f"winner_{cmp_year_a}": f"Winner {cmp_year_a}",
+            f"party_{cmp_year_a}":  f"Party {cmp_year_a}",
+            f"votes_{cmp_year_a}":  f"Votes {cmp_year_a}",
+            f"winner_{cmp_year_b}": f"Winner {cmp_year_b}",
+            f"party_{cmp_year_b}":  f"Party {cmp_year_b}",
+            f"votes_{cmp_year_b}":  f"Votes {cmp_year_b}",
+            "Party Result":         "Party Result",
+        }
+        if has_alliance:
+            col_rename["Alliance Result"] = "Alliance Result"
+
+        disp_const = disp_const.rename(columns=col_rename)
+        show_cols  = [c for c in col_rename.values() if c in disp_const.columns]
+
+        st.dataframe(
+            disp_const[show_cols],
+            use_container_width=True,
+            hide_index=True,
+            height=min(500, 40 + len(disp_const) * 38),
+            column_config={
+                f"Votes {cmp_year_a}": st.column_config.NumberColumn(format="%d"),
+                f"Votes {cmp_year_b}": st.column_config.NumberColumn(format="%d"),
+                "Party Result":        st.column_config.TextColumn("Party Result"),
+                "Alliance Result":     st.column_config.TextColumn("Alliance Result"),
+            },
+        )
+
+        st.divider()
+
+        # ── Part C — Constituency Deep Dive ───────────────────────────────────
+        st.markdown('<div class="section-title">Constituency Deep Dive</div>', unsafe_allow_html=True)
+
+        all_consts = sorted(const_cmp["constituency"].dropna().unique())
+        sel_const_cmp = st.selectbox("Select Constituency", all_consts, key="cmp_const")
+
+        col_l, col_r = st.columns(2)
+
+        # Year A detail
+        with col_l:
+            st.markdown(f"**{cmp_year_a}**")
+            cand_a = df_a[df_a["constituency"] == sel_const_cmp].sort_values("total_votes", ascending=False).copy()
+            if not cand_a.empty:
+                total_ca = cand_a["total_votes"].sum()
+                cand_a["Share %"] = (cand_a["total_votes"] / total_ca * 100).round(1)
+                st.dataframe(
+                    cand_a[["candidate","party","total_votes","Share %"]].reset_index(drop=True),
+                    use_container_width=True, hide_index=True,
+                    column_config={
+                        "candidate":   st.column_config.TextColumn("Candidate"),
+                        "party":       st.column_config.TextColumn("Party"),
+                        "total_votes": st.column_config.NumberColumn("Votes", format="%d"),
+                        "Share %":     st.column_config.NumberColumn("Share %", format="%.1f%%"),
+                    },
+                )
+            else:
+                st.info("No data for this constituency in this year.")
+
+        # Year B detail
+        with col_r:
+            st.markdown(f"**{cmp_year_b}**")
+            cand_b = df_b[df_b["constituency"] == sel_const_cmp].sort_values("total_votes", ascending=False).copy()
+            if not cand_b.empty:
+                total_cb = cand_b["total_votes"].sum()
+                cand_b["Share %"] = (cand_b["total_votes"] / total_cb * 100).round(1)
+                st.dataframe(
+                    cand_b[["candidate","party","total_votes","Share %"]].reset_index(drop=True),
+                    use_container_width=True, hide_index=True,
+                    column_config={
+                        "candidate":   st.column_config.TextColumn("Candidate"),
+                        "party":       st.column_config.TextColumn("Party"),
+                        "total_votes": st.column_config.NumberColumn("Votes", format="%d"),
+                        "Share %":     st.column_config.NumberColumn("Share %", format="%.1f%%"),
+                    },
+                )
+            else:
+                st.info("No data for this constituency in this year.")
+
+        # Winner comparison summary
+        row_a = const_cmp[const_cmp["constituency"] == sel_const_cmp]
+        if not row_a.empty:
+            r = row_a.iloc[0]
+            w_a  = r.get(f"winner_{cmp_year_a}", "—")
+            w_b  = r.get(f"winner_{cmp_year_b}", "—")
+            p_a  = r.get(f"party_{cmp_year_a}",  "—")
+            p_b  = r.get(f"party_{cmp_year_b}",  "—")
+            v_a  = int(r.get(f"votes_{cmp_year_a}", 0)) if pd.notna(r.get(f"votes_{cmp_year_a}")) else 0
+            v_b  = int(r.get(f"votes_{cmp_year_b}", 0)) if pd.notna(r.get(f"votes_{cmp_year_b}")) else 0
+            result = r.get("Party Result", "—")
+            result_color = "#1D9E75" if result == "Held" else "#E24B4A" if result == "Flipped" else "#888"
+
+            st.markdown(f"""
+            <div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:1rem;margin-top:1rem;
+                        border:0.5px solid rgba(255,255,255,0.12);">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div style="text-align:center;flex:1;">
+                        <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">{cmp_year_a} WINNER</div>
+                        <div style="font-size:14px;font-weight:600;color:#ffffff;">{w_a}</div>
+                        <div style="font-size:12px;color:#9ca3af;">{p_a}</div>
+                        <div style="font-size:13px;color:#f59e0b;">{v_a:,} votes</div>
+                    </div>
+                    <div style="text-align:center;padding:0 1rem;">
+                        <div style="font-size:20px;">→</div>
+                        <div style="font-size:12px;font-weight:600;color:{result_color};">{result}</div>
+                    </div>
+                    <div style="text-align:center;flex:1;">
+                        <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">{cmp_year_b} WINNER</div>
+                        <div style="font-size:14px;font-weight:600;color:#ffffff;">{w_b}</div>
+                        <div style="font-size:12px;color:#9ca3af;">{p_b}</div>
+                        <div style="font-size:13px;color:#f59e0b;">{v_b:,} votes</div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
 with tab7:
     st.markdown('<div class="section-title">Ask Data</div>', unsafe_allow_html=True)
