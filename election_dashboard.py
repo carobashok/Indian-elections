@@ -858,7 +858,7 @@ with tab6:
             # Build summary
             summary = []
             for (year, election), grp in seats_df.groupby(["election_year","election"]):
-                is_loksabha = "lok sabha" in election.lower()
+                is_loksabha = "lok sabha" in election.lower() or "loksabha" in election.lower()
                 if is_loksabha:
                     seats = grp["constituency"].nunique()
                     summary.append({"Election": election, "Year": year,
