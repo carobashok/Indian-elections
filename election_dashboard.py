@@ -427,7 +427,7 @@ kpi(c4,"Total Votes",    f"{total_votes/1_00_000:.2f}L",  "lakh votes polled")
 kpi(c5,"Leading Party",  str(seats_leading),              f"seats · {shorten(leading_party,20)}")
 st.divider()
 
-tab1,tab2,tab3,tab4,tab5,tab6,tab7 = st.tabs(["🏆  Winners Board","🤝  Alliance View","🎯  Party Performance","🥧  Vote Share","👤  Candidate Comparison","💬  Ask Data","ℹ️  About"])
+tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8 = st.tabs(["🏆  Winners Board","🤝  Alliance View","🎯  Party Performance","🥧  Vote Share","👤  Candidate Comparison","📊  Compare","💬  Ask Data","ℹ️  About"])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 · Winners Board
@@ -909,7 +909,7 @@ with tab5:
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 6 · About
 # ══════════════════════════════════════════════════════════════════════════════
-with tab7:
+with tab8:
     @st.cache_data(ttl=600)
     def load_elections_list():
         resp = get_client().table("election_results").select("election_year,state,election").execute()
@@ -1080,8 +1080,21 @@ Rules:
   SELECT ... FROM ranked WHERE rn = 1
 - Never use total_votes in INSERT/UPDATE — it is a generated column
 - Always include meaningful column aliases for readability
-- When counting seats won by a party per state, also include total constituencies in that state as a separate column so win % can be calculated
-  Example: SELECT state, COUNT(*) FILTER (WHERE rn=1 AND party ILIKE '%BJP%') as seats_won, COUNT(DISTINCT constituency) as total_seats FROM ..."""
+- When calculating strike rate or win %, use constituencies CONTESTED by the party (rows where that party appears), NOT total constituencies in the state
+  Strike Rate = seats_won / constituencies_contested * 100
+  Example for party strike rate per state:
+  WITH ranked AS (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY constituency, state, election_year, election ORDER BY total_votes DESC) AS rn
+    FROM election_results
+  )
+  SELECT state,
+    COUNT(DISTINCT constituency) as contested,
+    COUNT(DISTINCT CASE WHEN rn=1 THEN constituency END) as seats_won,
+    ROUND(COUNT(DISTINCT CASE WHEN rn=1 THEN constituency END) * 100.0 / COUNT(DISTINCT constituency), 1) as strike_rate_pct
+  FROM ranked
+  WHERE party ILIKE '%Bharatiya Janata Party%'
+  GROUP BY state
+  ORDER BY seats_won DESC"""
 
     ANSWER_SYSTEM = """You are an Indian election data analyst. 
 You are given a user question and the SQL query result as a data table.
@@ -1225,3 +1238,204 @@ Important rules for analysis:
                         st.dataframe(res_df, use_container_width=True, hide_index=True)
     else:
         st.info("Ask a question above to get started!")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 6 · Compare
+# ══════════════════════════════════════════════════════════════════════════════
+with tab6:
+    st.markdown('<div class="section-title">Compare Elections</div>', unsafe_allow_html=True)
+
+    # ── Comparison filters ─────────────────────────────────────────────────────
+    fdf_c = load_filter_options()
+
+    cf1, cf2, cf3 = st.columns(3)
+    with cf1:
+        cmp_election = st.selectbox("Election Type", sorted(fdf_c["election"].unique()), key="cmp_election")
+    with cf2:
+        years_avail  = sorted(fdf_c[fdf_c["election"] == cmp_election]["election_year"].unique(), reverse=True)
+        cmp_year_a   = st.selectbox("Year A (Base)", years_avail, key="cmp_year_a")
+    with cf3:
+        years_b      = [y for y in years_avail if y != cmp_year_a]
+        if years_b:
+            cmp_year_b = st.selectbox("Year B (Compare)", years_b, key="cmp_year_b")
+        else:
+            st.warning("Need at least 2 years of data for this election type.")
+            st.stop()
+
+    # State filter
+    is_loksabha_cmp = "lok sabha" in cmp_election.lower() or "loksabha" in cmp_election.lower()
+    states_cmp = sorted(fdf_c[fdf_c["election"] == cmp_election]["state"].unique())
+    if is_loksabha_cmp:
+        states_cmp = ["All States"] + states_cmp
+    cmp_state = st.selectbox("State", states_cmp, key="cmp_state")
+
+    st.divider()
+
+    # ── Load data for both years ───────────────────────────────────────────────
+    df_a = load_data(cmp_year_a, cmp_state, cmp_election)
+    df_b = load_data(cmp_year_b, cmp_state, cmp_election)
+
+    if df_a.empty or df_b.empty:
+        st.warning("Not enough data for comparison. Please check if both years have data loaded.")
+        st.stop()
+
+    # ── Sub-tabs ───────────────────────────────────────────────────────────────
+    ctab1, ctab2 = st.tabs([
+        f"🏛️ Party Seats  {cmp_year_a} vs {cmp_year_b}",
+        f"📊 Vote Share Swing  {cmp_year_a} vs {cmp_year_b}",
+    ])
+
+    # ── Helper: compute winners ────────────────────────────────────────────────
+    def get_winners(df):
+        df2 = df.copy()
+        df2["rank"] = df2.groupby("constituency")["total_votes"].rank(method="first", ascending=False).astype(int)
+        return df2[df2["rank"] == 1][["constituency", "candidate", "party", "total_votes"]].copy()
+
+    winners_a = get_winners(df_a)
+    winners_b = get_winners(df_b)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # Sub-tab 1 · Party Seats Comparison
+    # ══════════════════════════════════════════════════════════════════════════
+    with ctab1:
+        seats_a = winners_a.groupby("party").size().reset_index(name=str(cmp_year_a))
+        seats_b = winners_b.groupby("party").size().reset_index(name=str(cmp_year_b))
+
+        seats_cmp = seats_a.merge(seats_b, on="party", how="outer").fillna(0)
+        seats_cmp[str(cmp_year_a)] = seats_cmp[str(cmp_year_a)].astype(int)
+        seats_cmp[str(cmp_year_b)] = seats_cmp[str(cmp_year_b)].astype(int)
+        seats_cmp["Change"]  = seats_cmp[str(cmp_year_b)] - seats_cmp[str(cmp_year_a)]
+        seats_cmp = seats_cmp.sort_values(str(cmp_year_b), ascending=False).reset_index(drop=True)
+
+        # Chart — grouped bar
+        top_parties = seats_cmp.head(15)
+        fig_cmp = go.Figure()
+        fig_cmp.add_trace(go.Bar(
+            name=str(cmp_year_a),
+            x=top_parties["party"].apply(lambda p: shorten(p, 20)),
+            y=top_parties[str(cmp_year_a)],
+            marker_color="#378ADD",
+            text=top_parties[str(cmp_year_a)],
+            textposition="outside",
+            textfont=dict(size=12),
+        ))
+        fig_cmp.add_trace(go.Bar(
+            name=str(cmp_year_b),
+            x=top_parties["party"].apply(lambda p: shorten(p, 20)),
+            y=top_parties[str(cmp_year_b)],
+            marker_color="#1D9E75",
+            text=top_parties[str(cmp_year_b)],
+            textposition="outside",
+            textfont=dict(size=12),
+        ))
+        fig_cmp.update_layout(
+            barmode="group",
+            height=420,
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            font=FONT,
+            bargap=0.25,
+            bargroupgap=0.1,
+            xaxis=dict(tickfont=dict(size=12), tickangle=-30),
+            yaxis=dict(title="Seats Won", showgrid=True, gridcolor="#f3f4f6", tickfont=dict(size=12)),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=13)),
+            margin=dict(l=20, r=20, t=50, b=80),
+        )
+        st.plotly_chart(fig_cmp, use_container_width=True)
+
+        # Table
+        st.markdown('<div class="section-title">Seats Won — Detail</div>', unsafe_allow_html=True)
+
+        def fmt_change(v):
+            if v > 0:   return f"▲ {v}"
+            elif v < 0: return f"▼ {abs(v)}"
+            else:       return "—"
+
+        disp_seats = seats_cmp.copy()
+        disp_seats["Change"] = disp_seats["Change"].apply(fmt_change)
+
+        st.dataframe(
+            disp_seats,
+            use_container_width=True,
+            hide_index=True,
+            height=min(500, 40 + len(disp_seats) * 38),
+            column_config={
+                "party":          st.column_config.TextColumn("Party", width="large"),
+                str(cmp_year_a):  st.column_config.NumberColumn(str(cmp_year_a), format="%d"),
+                str(cmp_year_b):  st.column_config.NumberColumn(str(cmp_year_b), format="%d"),
+                "Change":         st.column_config.TextColumn("Change"),
+            },
+        )
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # Sub-tab 2 · Vote Share Swing
+    # ══════════════════════════════════════════════════════════════════════════
+    with ctab2:
+        # Compute vote share per party for each year
+        def vote_share(df):
+            total = df["total_votes"].sum()
+            vs = df.groupby("party")["total_votes"].sum().reset_index()
+            vs["share"] = (vs["total_votes"] / total * 100).round(2)
+            return vs[["party", "share"]]
+
+        vs_a = vote_share(df_a).rename(columns={"share": str(cmp_year_a)})
+        vs_b = vote_share(df_b).rename(columns={"share": str(cmp_year_b)})
+
+        vs_cmp = vs_a.merge(vs_b, on="party", how="outer").fillna(0)
+        vs_cmp[str(cmp_year_a)] = vs_cmp[str(cmp_year_a)].round(2)
+        vs_cmp[str(cmp_year_b)] = vs_cmp[str(cmp_year_b)].round(2)
+        vs_cmp["Swing"] = (vs_cmp[str(cmp_year_b)] - vs_cmp[str(cmp_year_a)]).round(2)
+        vs_cmp = vs_cmp[vs_cmp[[str(cmp_year_a), str(cmp_year_b)]].max(axis=1) >= 1.0]  # filter tiny parties
+        vs_cmp = vs_cmp.sort_values("Swing", ascending=False).reset_index(drop=True)
+
+        # Swing bar chart
+        colors_swing = ["#1D9E75" if v >= 0 else "#E24B4A" for v in vs_cmp["Swing"]]
+        fig_swing = go.Figure(go.Bar(
+            x=vs_cmp["Swing"],
+            y=vs_cmp["party"].apply(lambda p: shorten(p, 28)),
+            orientation="h",
+            marker_color=colors_swing,
+            text=vs_cmp["Swing"].apply(lambda v: f"{'▲' if v>=0 else '▼'} {abs(v):.1f}%"),
+            textposition="outside",
+            textfont=dict(size=13, color="#111111"),
+        ))
+        fig_swing.update_layout(
+            height=max(350, len(vs_cmp) * 40),
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            font=FONT,
+            xaxis=dict(
+                title="Vote share swing (%)",
+                showgrid=True, gridcolor="#f3f4f6",
+                tickfont=dict(size=12),
+                ticksuffix="%",
+            ),
+            yaxis=dict(tickfont=dict(size=13), automargin=True),
+            margin=dict(l=20, r=120, t=30, b=20),
+        )
+        st.plotly_chart(fig_swing, use_container_width=True)
+
+        # Table
+        st.markdown('<div class="section-title">Vote Share — Detail</div>', unsafe_allow_html=True)
+
+        def fmt_swing(v):
+            if v > 0:   return f"▲ {v:.1f}%"
+            elif v < 0: return f"▼ {abs(v):.1f}%"
+            else:       return "—"
+
+        disp_vs = vs_cmp.copy()
+        disp_vs["Swing"] = disp_vs["Swing"].apply(fmt_swing)
+
+        st.dataframe(
+            disp_vs,
+            use_container_width=True,
+            hide_index=True,
+            height=min(500, 40 + len(disp_vs) * 38),
+            column_config={
+                "party":          st.column_config.TextColumn("Party",         width="large"),
+                str(cmp_year_a):  st.column_config.NumberColumn(str(cmp_year_a), format="%.2f%%"),
+                str(cmp_year_b):  st.column_config.NumberColumn(str(cmp_year_b), format="%.2f%%"),
+                "Swing":          st.column_config.TextColumn("Swing"),
+            },
+        )
