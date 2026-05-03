@@ -617,8 +617,9 @@ with tab3:
     seats["label"] = seats["party"].apply(lambda p: shorten(p, 32))
 
     # Single trace — renders proper thick bars unlike one-trace-per-bar approach
+    seats_plot = seats.sort_values("seats", ascending=False)
     fig_s = px.bar(
-        seats, x="seats", y="label", orientation="h",
+        seats_plot, x="seats", y="label", orientation="h",
         color="label", text="seats",
         color_discrete_sequence=px.colors.qualitative.Bold,
         custom_data=["party"],
@@ -645,8 +646,9 @@ with tab3:
     pv["text_label"] = pv["total_votes"].apply(lambda x: f"{x/1_00_000:.2f}L")
 
     fig_v = go.Figure()
+    pv_plot = pv.sort_values("total_votes", ascending=False)
     fig_v = px.bar(
-        pv, x="total_votes", y="label", orientation="h",
+        pv_plot, x="total_votes", y="label", orientation="h",
         color="label", text="text_label",
         color_discrete_sequence=px.colors.qualitative.Safe,
         custom_data=["party","vote_share"],
