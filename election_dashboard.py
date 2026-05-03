@@ -1066,7 +1066,11 @@ Format numbers with commas. Be direct and factual. Keep it brief."""
                     }],
                 )
                 answer = answer_resp.content[0].text.strip()
-                st.session_state["ask_history"].append((question, sql_query, result_df, answer))
+
+                # Step 4 — detect chart request and render
+                chart_keywords = ["bar chart","bar graph","chart","graph","plot","visuali"]
+                wants_chart = any(k in question.lower() for k in chart_keywords)
+                st.session_state["ask_history"].append((question, sql_query, result_df, answer, wants_chart))
 
             except Exception as e:
                 st.error(f"Error: {e}")
@@ -1074,10 +1078,14 @@ Format numbers with commas. Be direct and factual. Keep it brief."""
     # ── Display history ────────────────────────────────────────────────────────
     if st.session_state.get("ask_history"):
         for item in reversed(st.session_state["ask_history"]):
-            # Handle both old (2-tuple) and new (4-tuple) history formats
-            if len(item) == 2:
-                continue  # skip old format entries
-            q, sql_q, res_df, ans = item
+            if len(item) < 4:
+                continue
+            q   = item[0]
+            sql_q  = item[1]
+            res_df = item[2]
+            ans    = item[3]
+            wants_chart = item[4] if len(item) > 4 else False
+
             st.markdown(
                 f'<div style="background:rgba(245,158,11,0.08);border-left:3px solid #f59e0b;' +
                 f'border-radius:8px;padding:0.75rem 1rem;margin-bottom:0.5rem;">' +
@@ -1092,6 +1100,31 @@ Format numbers with commas. Be direct and factual. Keep it brief."""
                 f'<div style="font-size:14px;color:#e5e7eb;line-height:1.7;">{ans}</div></div>',
                 unsafe_allow_html=True,
             )
+
+            # Render chart if requested and data has exactly 2 columns
+            if wants_chart and not res_df.empty and len(res_df.columns) >= 2:
+                try:
+                    cols = res_df.columns.tolist()
+                    # Find numeric column for x-axis and label column for y-axis
+                    num_cols  = res_df.select_dtypes(include="number").columns.tolist()
+                    cat_cols  = [c for c in cols if c not in num_cols]
+                    if num_cols and cat_cols:
+                        x_col = num_cols[0]
+                        y_col = cat_cols[0]
+                        chart_df = res_df.sort_values(x_col, ascending=True)
+                        fig_ask = px.bar(
+                            chart_df, x=x_col, y=y_col, orientation="h",
+                            color=y_col, text=x_col,
+                            color_discrete_sequence=px.colors.qualitative.Bold,
+                        )
+                        fig_ask.update_traces(textposition="outside", textfont=dict(size=14))
+                        layout_ask = hbar_layout(len(chart_df), left_margin=220, right_margin=80, title_x=x_col)
+                        layout_ask["showlegend"] = False
+                        fig_ask.update_layout(**layout_ask)
+                        st.plotly_chart(fig_ask, use_container_width=True)
+                except Exception:
+                    pass  # silently skip chart if it fails
+
             if is_admin_ask:
                 with st.expander("🔍 SQL Query Used"):
                     st.code(sql_q, language="sql")
