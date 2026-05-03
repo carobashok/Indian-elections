@@ -954,36 +954,66 @@ with tab7:
 # TAB 6 · Ask Data
 # ══════════════════════════════════════════════════════════════════════════════
 with tab6:
-    st.markdown('<div class="section-title">Ask About This Election</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Ask Data</div>', unsafe_allow_html=True)
     st.markdown(
-        '<p style="color:#9ca3af;font-size:14px;margin-bottom:1.5rem;">'
-        'Ask any question about the election data currently loaded. For example: '
-        '<i>"Which party won the most seats?", "Who won in Agiaon?", '
-        '"What was the winning margin in Patna Sahib?", '
-        '"Which constituency had the closest contest?"</i></p>',
+        '<p style="color:#9ca3af;font-size:14px;margin-bottom:1.5rem;">' 
+        'Ask anything about Indian election results — across any state, year, or election. ' 
+        '<i>Examples: "How many seats did BJP win across all assembly elections?", ' 
+        '"Which state had the highest winning margin in Lok Sabha 2024?", ' 
+        '"Who won in Agiaon in 2025?"</i></p>',
         unsafe_allow_html=True,
     )
 
-    def build_context(df, winners_df):
-        return f"""You are analyzing Indian election results. 
-Current filter: {sel_election} | {sel_year} | {sel_state}
+    # ── Schema context for SQL generation ─────────────────────────────────────
+    DB_SCHEMA = """
+Table: election_results
+Columns:
+  id              BIGSERIAL PRIMARY KEY
+  state           TEXT          -- e.g. 'Bihar', 'NCT of Delhi', 'Maharashtra'
+  election_year   SMALLINT      -- e.g. 2024, 2025
+  election        TEXT          -- e.g. 'State Assembly', 'Loksabha'
+  constituency    TEXT          -- constituency name
+  candidate       TEXT          -- candidate name
+  party           TEXT          -- party name
+  evm_votes       INTEGER
+  postal_votes    INTEGER
+  total_votes     INTEGER       -- generated = evm_votes + postal_votes
 
-WINNERS (constituency, candidate, party, total_votes, margin):
-{winners_df.to_string(index=False, max_rows=300)}
+Notes:
+- Lok Sabha election is stored as 'Loksabha' (no space)
+- NOTA rows have candidate='NOTA' and party='None of the Above'
+- Winner per constituency = candidate with highest total_votes
+- To find winner: use ROW_NUMBER() OVER (PARTITION BY constituency, state, election_year, election ORDER BY total_votes DESC) = 1
+"""
 
-ALL CANDIDATES (constituency, candidate, party, total_votes, evm_votes, postal_votes):
-{df[["constituency","candidate","party","total_votes","evm_votes","postal_votes"]].to_string(index=False, max_rows=600)}
+    SQL_SYSTEM = f"""You are a PostgreSQL expert. Generate a single valid SQL SELECT query to answer the user's question.
+The database has this schema:
+{DB_SCHEMA}
 
 Rules:
-- Answer ONLY from the data above
-- Be concise and clear
-- Format numbers with commas
-- If question cannot be answered from data, say so
-- Never make up information"""
+- Return ONLY the SQL query, nothing else — no explanation, no markdown, no backticks
+- Always use lowercase column names
+- Use ILIKE for case-insensitive text matching
+- Limit results to 50 rows unless the question asks for a specific count/aggregate
+- For winner queries use: ROW_NUMBER() OVER (PARTITION BY constituency, state, election_year, election ORDER BY total_votes DESC) = 1
+- Never use total_votes in INSERT/UPDATE — it is a generated column
+- Always include meaningful column aliases for readability"""
+
+    ANSWER_SYSTEM = """You are an Indian election data analyst. 
+You are given a user question and the SQL query result as a data table.
+Explain the result clearly and concisely in plain English.
+Format numbers with commas. Be direct and factual. Keep it brief."""
+
+    # ── Check if admin is logged in ────────────────────────────────────────────
+    is_admin_ask = (
+        "admin_key" in st.session_state and
+        st.session_state.get("admin_key","") == st.secrets.get("ADMIN_PASSWORD",
+            st.secrets.get("admin", {}).get("ADMIN_PASSWORD",""))
+    )
 
     question = st.text_input(
         "Your question",
-        placeholder="e.g. Which party won the most seats?",
+        placeholder="e.g. How many seats did BJP win in Bihar 2025?",
         key="ask_data_q",
     )
 
@@ -999,44 +1029,64 @@ Rules:
         st.session_state["ask_history"] = []
 
     if ask_btn and question.strip():
-        with st.spinner("Thinking..."):
+        with st.spinner("Generating query..."):
             try:
                 import anthropic as ac
                 ai = ac.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
-                ctx = build_context(df, winners_df)
 
-                msgs = []
-                for q, a in st.session_state["ask_history"]:
-                    msgs.append({"role": "user",      "content": q})
-                    msgs.append({"role": "assistant", "content": a})
-                msgs.append({"role": "user", "content": question})
-
-                resp   = ai.messages.create(
+                # Step 1 — Generate SQL
+                sql_resp = ai.messages.create(
                     model="claude-sonnet-4-20250514",
-                    max_tokens=1000,
-                    system=ctx,
-                    messages=msgs,
+                    max_tokens=500,
+                    system=SQL_SYSTEM,
+                    messages=[{"role":"user","content": question}],
                 )
-                answer = resp.content[0].text
-                st.session_state["ask_history"].append((question, answer))
+                sql_query = sql_resp.content[0].text.strip()
+
+                # Step 2 — Run SQL against Supabase via postgrest rpc or direct query
+                # Use supabase postgrest — wrap in rpc call using raw SQL
+                result = get_client().rpc("run_sql", {"query": sql_query}).execute()
+                result_df = pd.DataFrame(result.data) if result.data else pd.DataFrame()
+
+                # Step 3 — Generate plain English answer
+                result_str = result_df.to_string(index=False) if not result_df.empty else "No results found."
+                answer_resp = ai.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=500,
+                    system=ANSWER_SYSTEM,
+                    messages=[{
+                        "role": "user",
+                        "content": f"Question: {question}\n\nSQL Result:\n{result_str}"
+                    }],
+                )
+                answer = answer_resp.content[0].text.strip()
+                st.session_state["ask_history"].append((question, sql_query, result_df, answer))
+
             except Exception as e:
                 st.error(f"Error: {e}")
 
+    # ── Display history ────────────────────────────────────────────────────────
     if st.session_state.get("ask_history"):
-        for q, a in reversed(st.session_state["ask_history"]):
+        for item in reversed(st.session_state["ask_history"]):
+            q, sql_q, res_df, ans = item
             st.markdown(
-                f'<div style="background:rgba(245,158,11,0.08);border-left:3px solid #f59e0b;'
-                f'border-radius:8px;padding:0.75rem 1rem;margin-bottom:0.5rem;">'
-                f'<div style="font-size:12px;font-weight:600;color:#f59e0b;margin-bottom:4px;">YOU</div>'
+                f'<div style="background:rgba(245,158,11,0.08);border-left:3px solid #f59e0b;' +
+                f'border-radius:8px;padding:0.75rem 1rem;margin-bottom:0.5rem;">' +
+                f'<div style="font-size:12px;font-weight:600;color:#f59e0b;margin-bottom:4px;">YOU</div>' +
                 f'<div style="font-size:14px;color:#ffffff;">{q}</div></div>',
                 unsafe_allow_html=True,
             )
             st.markdown(
-                f'<div style="background:rgba(255,255,255,0.04);border-left:3px solid #378ADD;'
-                f'border-radius:8px;padding:0.75rem 1rem;margin-bottom:1.25rem;">'
-                f'<div style="font-size:12px;font-weight:600;color:#378ADD;margin-bottom:4px;">ANSWER</div>'
-                f'<div style="font-size:14px;color:#e5e7eb;line-height:1.7;">{a}</div></div>',
+                f'<div style="background:rgba(255,255,255,0.04);border-left:3px solid #378ADD;' +
+                f'border-radius:8px;padding:0.75rem 1rem;margin-bottom:0.75rem;">' +
+                f'<div style="font-size:12px;font-weight:600;color:#378ADD;margin-bottom:4px;">ANSWER</div>' +
+                f'<div style="font-size:14px;color:#e5e7eb;line-height:1.7;">{ans}</div></div>',
                 unsafe_allow_html=True,
             )
+            if is_admin_ask:
+                with st.expander("🔍 SQL Query Used"):
+                    st.code(sql_q, language="sql")
+                    if not res_df.empty:
+                        st.dataframe(res_df, use_container_width=True, hide_index=True)
     else:
         st.info("Ask a question above to get started!")
