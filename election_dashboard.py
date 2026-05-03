@@ -1041,7 +1041,7 @@ Format numbers with commas. Be direct and factual. Keep it brief."""
                     system=SQL_SYSTEM,
                     messages=[{"role":"user","content": question}],
                 )
-                sql_query = sql_resp.content[0].text.strip()
+                sql_query = sql_resp.content[0].text.strip().rstrip(";").strip()
 
                 # Step 2 — Run SQL against Supabase via postgrest rpc or direct query
                 # Use supabase postgrest — wrap in rpc call using raw SQL
