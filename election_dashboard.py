@@ -374,16 +374,38 @@ tab1,tab2,tab3,tab4,tab5,tab6 = st.tabs(["🏆  Winners Board","🤝  Alliance V
 # ══════════════════════════════════════════════════════════════════════════════
 with tab1:
     st.markdown('<div class="section-title">Constituency-wise Winners</div>', unsafe_allow_html=True)
-    disp = winners_df.copy().sort_values("constituency")
-    disp.columns = ["Constituency","Winner","Party","Votes","Winning Margin"]
-    st.dataframe(
-        disp, use_container_width=True, height=500, hide_index=True,
-        column_config={
+
+    is_all_states = sel_state == "All States"
+
+    if is_all_states:
+        # Lok Sabha All States — add State column, sort by State → Constituency
+        disp = winners_df.copy()
+        # Merge state from main df
+        state_map = df[["constituency","state"]].drop_duplicates()
+        disp = disp.merge(state_map, on="constituency", how="left")
+        disp = disp.sort_values(["state","constituency"])
+        disp = disp[["state","constituency","candidate","party","total_votes","margin"]]
+        disp.columns = ["State","Constituency","Winner","Party","Votes","Winning Margin"]
+        col_config = {
             "Votes": st.column_config.NumberColumn(format="%d"),
             "Winning Margin": st.column_config.ProgressColumn(
                 "Winning Margin", min_value=0, max_value=int(disp["Winning Margin"].max()), format="%d"
             ),
-        },
+        }
+    else:
+        # State Assembly — no State column, sort by Constituency
+        disp = winners_df.copy().sort_values("constituency")
+        disp.columns = ["Constituency","Winner","Party","Votes","Winning Margin"]
+        col_config = {
+            "Votes": st.column_config.NumberColumn(format="%d"),
+            "Winning Margin": st.column_config.ProgressColumn(
+                "Winning Margin", min_value=0, max_value=int(disp["Winning Margin"].max()), format="%d"
+            ),
+        }
+
+    st.dataframe(
+        disp, use_container_width=True, height=500, hide_index=True,
+        column_config=col_config,
     )
 
     st.markdown('<div class="section-title">Top 15 · Largest Winning Margins</div>', unsafe_allow_html=True)
