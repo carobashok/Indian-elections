@@ -1289,6 +1289,10 @@ with tab6:
         const_a.columns = ["constituency", f"winner_{cmp_year_a}", f"party_{cmp_year_a}", f"votes_{cmp_year_a}"]
         const_b.columns = ["constituency", f"winner_{cmp_year_b}", f"party_{cmp_year_b}", f"votes_{cmp_year_b}"]
 
+        # Normalize constituency names to uppercase for reliable matching
+        const_a["constituency"] = const_a["constituency"].str.strip().str.upper()
+        const_b["constituency"] = const_b["constituency"].str.strip().str.upper()
+
         const_cmp = const_a.merge(const_b, on="constituency", how="outer")
 
         # Party-level result
@@ -1390,10 +1394,14 @@ with tab6:
 
         col_l, col_r = st.columns(2)
 
+        # Normalize constituency in main dfs for deep dive lookup
+        df_a["constituency_upper"] = df_a["constituency"].str.strip().str.upper()
+        df_b["constituency_upper"] = df_b["constituency"].str.strip().str.upper()
+
         # Year A detail
         with col_l:
             st.markdown(f"**{cmp_year_a}**")
-            cand_a = df_a[df_a["constituency"] == sel_const_cmp].sort_values("total_votes", ascending=False).copy()
+            cand_a = df_a[df_a["constituency_upper"] == sel_const_cmp].sort_values("total_votes", ascending=False).copy()
             if not cand_a.empty:
                 total_ca = cand_a["total_votes"].sum()
                 cand_a["Share %"] = (cand_a["total_votes"] / total_ca * 100).round(1)
@@ -1413,7 +1421,7 @@ with tab6:
         # Year B detail
         with col_r:
             st.markdown(f"**{cmp_year_b}**")
-            cand_b = df_b[df_b["constituency"] == sel_const_cmp].sort_values("total_votes", ascending=False).copy()
+            cand_b = df_b[df_b["constituency_upper"] == sel_const_cmp].sort_values("total_votes", ascending=False).copy()
             if not cand_b.empty:
                 total_cb = cand_b["total_votes"].sum()
                 cand_b["Share %"] = (cand_b["total_votes"] / total_cb * 100).round(1)
