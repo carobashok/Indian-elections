@@ -1006,9 +1006,9 @@ with tab6:
             font=FONT,
             bargap=0.25,
             bargroupgap=0.1,
-            xaxis=dict(tickfont=dict(size=12), tickangle=-30),
-            yaxis=dict(title="Seats Won", showgrid=True, gridcolor="#f3f4f6", tickfont=dict(size=12)),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=13)),
+            xaxis=dict(tickfont=dict(size=12, color="#1a1a2e"), tickangle=-30),
+            yaxis=dict(title="Seats Won", showgrid=True, gridcolor="#f3f4f6", tickfont=dict(size=12, color="#1a1a2e")),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=13, color="#1a1a2e")),
             margin=dict(l=20, r=20, t=50, b=80),
         )
         st.plotly_chart(fig_cmp, use_container_width=True)
@@ -1077,10 +1077,11 @@ with tab6:
             xaxis=dict(
                 title="Vote share swing (%)",
                 showgrid=True, gridcolor="#f3f4f6",
-                tickfont=dict(size=12),
+                tickfont=dict(size=12, color="#1a1a2e"),
                 ticksuffix="%",
+                title_font=dict(color="#1a1a2e"),
             ),
-            yaxis=dict(tickfont=dict(size=13), automargin=True),
+            yaxis=dict(tickfont=dict(size=13, color="#1a1a2e"), automargin=True),
             margin=dict(l=20, r=120, t=30, b=20),
         )
         st.plotly_chart(fig_swing, use_container_width=True)
@@ -1207,9 +1208,10 @@ with tab6:
                 barmode="group", height=400,
                 plot_bgcolor="white", paper_bgcolor="white", font=FONT,
                 bargap=0.25, bargroupgap=0.1,
-                xaxis=dict(tickfont=dict(size=12), tickangle=-20),
-                yaxis=dict(title="Seats Won", showgrid=True, gridcolor="#f3f4f6", tickfont=dict(size=12)),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=13)),
+                xaxis=dict(tickfont=dict(size=12, color="#ffffff"), tickangle=-20),
+                yaxis=dict(title="Seats Won", showgrid=True, gridcolor="#f3f4f6",
+                           tickfont=dict(size=12, color="#ffffff")),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=13, color="#ffffff")),
                 margin=dict(l=20, r=20, t=50, b=60),
             )
             st.plotly_chart(fig_al_cmp, use_container_width=True)
