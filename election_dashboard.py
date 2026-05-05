@@ -1723,10 +1723,11 @@ with tab8:
 
     with col_left:
         st.markdown('<div class="section-title">Elections Available</div>', unsafe_allow_html=True)
-        # Reuse fdf — no extra DB call
-        if not fdf.empty:
+        fdf_about = load_filter_options()
+        if not fdf_about.empty:
+            fdf = fdf_about
             summary = []
-            for (year, election), grp in fdf.groupby(["election_year","election"]):
+            for (year, election), grp in fdf_about.groupby(["election_year","election"]):
                 is_lok = "lok sabha" in election.lower() or "loksabha" in election.lower()
                 if is_lok:
                     summary.append({"Election": election, "Year": int(year), "State": "All States"})
