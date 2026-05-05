@@ -1530,91 +1530,50 @@ with tab7:
         unsafe_allow_html=True,
     )
 
-    # ── Schema context for SQL generation ─────────────────────────────────────
     DB_SCHEMA = """
 Table: election_results
 Columns:
-  id              BIGSERIAL PRIMARY KEY
-  state           TEXT          -- e.g. 'Bihar', 'NCT of Delhi', 'Maharashtra'
-  election_year   SMALLINT      -- e.g. 2024, 2025
-  election        TEXT          -- e.g. 'State Assembly', 'Loksabha'
-  constituency    TEXT          -- constituency name
-  candidate       TEXT          -- candidate name
-  party           TEXT          -- party name
-  evm_votes       INTEGER
-  postal_votes    INTEGER
-  total_votes     INTEGER       -- generated = evm_votes + postal_votes
-
+  state TEXT, election_year SMALLINT, election TEXT,
+  constituency TEXT, candidate TEXT, party TEXT,
+  evm_votes INTEGER, postal_votes INTEGER, total_votes INTEGER (generated)
 Notes:
-- Lok Sabha election is stored as 'Loksabha' (no space)
-- NOTA rows have candidate='NOTA' and party='None of the Above'
-- Winner per constituency = candidate with highest total_votes
-- To find winner: use ROW_NUMBER() OVER (PARTITION BY constituency, state, election_year, election ORDER BY total_votes DESC) = 1
+- Lok Sabha stored as 'Loksabha'
+- Winner = candidate with highest total_votes per constituency
+- Use CTE with ROW_NUMBER() for winner queries, never window fn in WHERE
 """
 
-    # ── Load party aliases ─────────────────────────────────────────────────────
     @st.cache_data(ttl=300)
     def load_party_aliases():
         resp = get_client().table("party_aliases").select("short_name,full_name").execute()
         return pd.DataFrame(resp.data) if resp.data else pd.DataFrame()
 
-    aliases_df = load_party_aliases()
+    aliases_df  = load_party_aliases()
+    alias_lines = []
     if not aliases_df.empty:
-        alias_str = "\n".join(
-            f"  {row['short_name']} = {row['full_name']}"
-            for _, row in aliases_df.iterrows()
-        )
-        ALIAS_CONTEXT = f"\n\nParty Short Name Aliases (use full name in SQL queries):\n{alias_str}"
-    else:
-        ALIAS_CONTEXT = ""
+        alias_lines = [f"  {r['short_name']} = {r['full_name']}" for _, r in aliases_df.iterrows()]
+    ALIAS_CONTEXT = ("\n\nParty aliases:\n" + "\n".join(alias_lines)) if alias_lines else ""
 
-    SQL_SYSTEM = f"""You are a PostgreSQL expert. Generate a single valid SQL SELECT query to answer the user's question.
-The database has this schema:
-{DB_SCHEMA}{ALIAS_CONTEXT}
-
+    SQL_SYSTEM = f"""You are a PostgreSQL expert. Return ONLY a valid SQL SELECT query — no explanation, no markdown, no backticks, no semicolon.
+Schema:{DB_SCHEMA}{ALIAS_CONTEXT}
 Rules:
-- Return ONLY the SQL query, nothing else — no explanation, no markdown, no backticks
-- Always use lowercase column names
-- Use ILIKE for case-insensitive text matching
-- Limit results to 50 rows unless the question asks for a specific count/aggregate
-- NEVER use window functions (like ROW_NUMBER()) directly in a WHERE clause — always wrap in a subquery or CTE
-- For winner queries, use this CTE pattern:
-  WITH ranked AS (
-    SELECT *, ROW_NUMBER() OVER (PARTITION BY constituency, state, election_year, election ORDER BY total_votes DESC) AS rn
-    FROM election_results
-  )
-  SELECT ... FROM ranked WHERE rn = 1
-- Never use total_votes in INSERT/UPDATE — it is a generated column
-- Always include meaningful column aliases for readability
-- When calculating strike rate or win %, use constituencies CONTESTED by the party (rows where that party appears), NOT total constituencies in the state
-  Strike Rate = seats_won / constituencies_contested * 100"""
+- Use ILIKE for text matching. Limit to 50 rows unless aggregating.
+- NEVER use window functions in WHERE — always use CTE.
+- Winner CTE: WITH ranked AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY constituency,state,election_year,election ORDER BY total_votes DESC) AS rn FROM election_results) SELECT ... FROM ranked WHERE rn=1
+- Strike rate = seats_won / constituencies_contested (not total seats in state)
+- Include total_contested alongside seats_won for strike rate queries"""
 
-    ANSWER_SYSTEM = """You are an Indian election data analyst. 
-You are given a user question and the SQL query result as a data table.
-Explain the result clearly and concisely in plain English.
-Format numbers with commas. Be direct and factual. Keep it brief.
+    ANSWER_SYSTEM = """You are an Indian election analyst. Explain the SQL result clearly in plain English.
+Format numbers with commas. Be concise. 
+Base performance categories on win % (seats won / contested), never on raw seat count alone."""
 
-Important rules for analysis:
-- NEVER categorize performance based on raw seat numbers alone
-- If the data includes total seats or total constituencies for a state, always calculate win % = seats won / total seats * 100
-- Base any performance categorization (strong/moderate/limited) on win % not raw count
-- If total seats are not in the data, do not categorize — just report the numbers
-- Always mention both seats won AND win % when total seats are available"""
-
-    # ── Check if admin ─────────────────────────────────────────────────────────
     is_admin_ask = (
+        st.session_state.get("admin_key","") != "" and
         st.session_state.get("admin_key","") == st.secrets.get("ADMIN_PASSWORD",
-            st.secrets.get("admin", {}).get("ADMIN_PASSWORD",""))
-        and st.session_state.get("admin_key","") != ""
+            st.secrets.get("admin",{}).get("ADMIN_PASSWORD",""))
     )
 
-    question = st.text_input(
-        "Your question",
-        placeholder="e.g. How many seats did BJP win in Bihar 2025?",
-        key="ask_data_q",
-    )
-
-    col_a, col_b = st.columns([1, 6])
+    question  = st.text_input("Your question", placeholder="e.g. How many seats did BJP win in Bihar 2025?", key="ask_data_q")
+    col_a, col_b = st.columns([1,6])
     ask_btn   = col_a.button("Ask", type="primary", use_container_width=True)
     clear_btn = col_b.button("Clear history")
 
@@ -1626,91 +1585,61 @@ Important rules for analysis:
         st.session_state["ask_history"] = []
 
     if ask_btn and question.strip():
-        with st.spinner("Generating query..."):
+        with st.spinner("Thinking..."):
             try:
-                import anthropic as ac
+                import anthropic as ac, re
                 ai = ac.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
 
-                # Pre-process: replace short names with full names
                 processed_q = question
                 if not aliases_df.empty:
-                    import re
                     for _, row in aliases_df.iterrows():
-                        pattern = r'\b' + re.escape(row["short_name"]) + r'\b'
-                        processed_q = re.sub(pattern, row["full_name"], processed_q, flags=re.IGNORECASE)
+                        processed_q = re.sub(r'\b' + re.escape(row["short_name"]) + r'\b',
+                                             row["full_name"], processed_q, flags=re.IGNORECASE)
 
-                # Step 1 — Generate SQL
-                sql_resp = ai.messages.create(
-                    model="claude-sonnet-4-20250514",
-                    max_tokens=500,
+                sql_q = ai.messages.create(
+                    model="claude-sonnet-4-20250514", max_tokens=500,
                     system=SQL_SYSTEM,
-                    messages=[{"role":"user","content": processed_q}],
-                )
-                sql_query = sql_resp.content[0].text.strip().rstrip(";").strip()
+                    messages=[{"role":"user","content":processed_q}],
+                ).content[0].text.strip().rstrip(";").strip()
 
-                # Step 2 — Run SQL via Supabase RPC
-                result    = get_client().rpc("run_sql", {"query": sql_query}).execute()
+                result    = get_client().rpc("run_sql", {"query": sql_q}).execute()
                 result_df = pd.DataFrame(result.data) if result.data else pd.DataFrame()
 
-                # Step 3 — Generate plain English answer
-                result_str  = result_df.to_string(index=False) if not result_df.empty else "No results found."
-                answer_resp = ai.messages.create(
-                    model="claude-sonnet-4-20250514",
-                    max_tokens=500,
+                result_str = result_df.to_string(index=False) if not result_df.empty else "No results."
+                answer = ai.messages.create(
+                    model="claude-sonnet-4-20250514", max_tokens=500,
                     system=ANSWER_SYSTEM,
-                    messages=[{"role":"user","content": f"Question: {question}\n\nSQL Result:\n{result_str}"}],
-                )
-                answer = answer_resp.content[0].text.strip()
+                    messages=[{"role":"user","content":f"Question: {question}\n\nSQL Result:\n{result_str}"}],
+                ).content[0].text.strip()
 
-                # Detect chart request
-                chart_keywords = ["bar chart","bar graph","chart","graph","plot","visuali"]
-                wants_chart = any(k in question.lower() for k in chart_keywords)
-                st.session_state["ask_history"].append((question, sql_query, result_df, answer, wants_chart))
-
+                wants_chart = any(k in question.lower() for k in ["bar chart","chart","graph","plot"])
+                st.session_state["ask_history"].append((question, sql_q, result_df, answer, wants_chart))
             except Exception as e:
                 st.error(f"Error: {e}")
 
-    # ── Display history ────────────────────────────────────────────────────────
     if st.session_state.get("ask_history"):
         for item in reversed(st.session_state["ask_history"]):
-            if len(item) < 4:
-                continue
+            if len(item) < 4: continue
             q, sql_q, res_df, ans = item[0], item[1], item[2], item[3]
             wants_chart = item[4] if len(item) > 4 else False
-
-            st.markdown(
-                f'<div style="background:rgba(245,158,11,0.08);border-left:3px solid #f59e0b;' +
-                f'border-radius:8px;padding:0.75rem 1rem;margin-bottom:0.5rem;">' +
-                f'<div style="font-size:12px;font-weight:600;color:#f59e0b;margin-bottom:4px;">YOU</div>' +
-                f'<div style="font-size:14px;color:#ffffff;">{q}</div></div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                f'<div style="background:rgba(255,255,255,0.04);border-left:3px solid #378ADD;' +
-                f'border-radius:8px;padding:0.75rem 1rem;margin-bottom:0.75rem;">' +
-                f'<div style="font-size:12px;font-weight:600;color:#378ADD;margin-bottom:4px;">ANSWER</div>' +
-                f'<div style="font-size:14px;color:#e5e7eb;line-height:1.7;">{ans}</div></div>',
-                unsafe_allow_html=True,
-            )
-
+            st.markdown(f'<div style="background:rgba(245,158,11,0.08);border-left:3px solid #f59e0b;border-radius:8px;padding:0.75rem 1rem;margin-bottom:0.5rem;"><div style="font-size:12px;font-weight:600;color:#f59e0b;margin-bottom:4px;">YOU</div><div style="font-size:14px;color:#ffffff;">{q}</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="background:rgba(255,255,255,0.04);border-left:3px solid #378ADD;border-radius:8px;padding:0.75rem 1rem;margin-bottom:0.75rem;"><div style="font-size:12px;font-weight:600;color:#378ADD;margin-bottom:4px;">ANSWER</div><div style="font-size:14px;color:#e5e7eb;line-height:1.7;">{ans}</div></div>', unsafe_allow_html=True)
             if wants_chart and not res_df.empty and len(res_df.columns) >= 2:
                 try:
                     num_cols = res_df.select_dtypes(include="number").columns.tolist()
                     cat_cols = [c for c in res_df.columns if c not in num_cols]
                     if num_cols and cat_cols:
-                        x_col, y_col = num_cols[0], cat_cols[0]
-                        chart_df = res_df.sort_values(x_col, ascending=True)
-                        fig_ask  = px.bar(chart_df, x=x_col, y=y_col, orientation="h",
-                                          color=y_col, text=x_col,
-                                          color_discrete_sequence=px.colors.qualitative.Bold)
+                        fig_ask = px.bar(res_df.sort_values(num_cols[0], ascending=True),
+                                         x=num_cols[0], y=cat_cols[0], orientation="h",
+                                         color=cat_cols[0], text=num_cols[0],
+                                         color_discrete_sequence=px.colors.qualitative.Bold)
                         fig_ask.update_traces(textposition="outside", textfont=dict(size=14))
-                        layout_ask = hbar_layout(len(chart_df), left_margin=220, right_margin=80, title_x=x_col)
-                        layout_ask["showlegend"] = False
-                        fig_ask.update_layout(**layout_ask)
+                        la = hbar_layout(len(res_df), left_margin=220, right_margin=80, title_x=num_cols[0])
+                        la["showlegend"] = False
+                        fig_ask.update_layout(**la)
                         st.plotly_chart(fig_ask, use_container_width=True)
                 except Exception:
                     pass
-
             if is_admin_ask:
                 with st.expander("🔍 SQL Query Used"):
                     st.code(sql_q, language="sql")
@@ -1718,6 +1647,7 @@ Important rules for analysis:
                         st.dataframe(res_df, use_container_width=True, hide_index=True)
     else:
         st.info("Ask a question above to get started!")
+
 with tab8:
     col_left, col_right = st.columns(2)
 
@@ -1783,6 +1713,4 @@ with tab8:
 
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 7 · Ask Data
 # ══════════════════════════════════════════════════════════════════════════════
