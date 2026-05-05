@@ -69,24 +69,50 @@ def get_client():
 
 @st.cache_data(ttl=300)
 def load_filter_options():
-    resp = get_client().table("election_results").select("election_year,state,election").execute()
-    df = pd.DataFrame(resp.data)
+    # Use distinct query — much faster than fetching all rows
+    client = get_client()
+    all_rows = []
+    page_size = 1000
+    offset = 0
+    while True:
+        resp = client.table("election_results")             .select("election_year,state,election")             .range(offset, offset + page_size - 1).execute()
+        if not resp.data:
+            break
+        all_rows.extend(resp.data)
+        if len(resp.data) < page_size:
+            break
+        offset += page_size
+    df = pd.DataFrame(all_rows)
     if not df.empty:
         df["state"]    = df["state"].str.strip()
         df["election"] = df["election"].str.strip()
+        df = df.drop_duplicates()
     return df
 
 @st.cache_data(ttl=300)
 def load_data(year, state, election):
-    query = (
-        get_client().table("election_results").select("*")
-        .eq("election_year", year)
-        .eq("election", election)
-    )
-    if state != "All States":
-        query = query.eq("state", state)
-    resp = query.execute()
-    df = pd.DataFrame(resp.data)
+    client = get_client()
+    all_rows = []
+    page_size = 1000
+    offset = 0
+    while True:
+        query = (
+            client.table("election_results").select("*")
+            .eq("election_year", year)
+            .eq("election", election)
+            .range(offset, offset + page_size - 1)
+        )
+        if state != "All States":
+            query = query.eq("state", state)
+        resp = query.execute()
+        if not resp.data:
+            break
+        all_rows.extend(resp.data)
+        if len(resp.data) < page_size:
+            break
+        offset += page_size
+
+    df = pd.DataFrame(all_rows)
     if not df.empty:
         df["constituency"] = df["constituency"].str.strip()
         df["candidate"]    = df["candidate"].str.strip()
