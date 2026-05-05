@@ -967,6 +967,22 @@ with tab6:
 
     st.divider()
 
+    # ── Compare button — data only loads when clicked ─────────────────────────
+    if st.button("🔍 Compare", type="primary", key="compare_btn"):
+        st.session_state["compare_triggered"] = True
+        st.session_state["compare_params"] = (cmp_year_a, cmp_year_b, cmp_state, cmp_election)
+
+    # Only load and show data if compare has been triggered
+    if not st.session_state.get("compare_triggered"):
+        st.info("Select your filters above and click **Compare** to see the results.")
+        st.stop()
+
+    # If filters changed since last compare, prompt again
+    current_params = (cmp_year_a, cmp_year_b, cmp_state, cmp_election)
+    if st.session_state.get("compare_params") != current_params:
+        st.warning("Filters changed — click **Compare** again to refresh results.")
+        st.stop()
+
     # ── Load data for both years ───────────────────────────────────────────────
     df_a = load_data(cmp_year_a, cmp_state, cmp_election)
     df_b = load_data(cmp_year_b, cmp_state, cmp_election)
@@ -1514,22 +1530,6 @@ with tab7:
         unsafe_allow_html=True,
     )
 
-    # ── Load party aliases ────────────────────────────────────────────────────
-    @st.cache_data(ttl=300)
-    def load_party_aliases():
-        resp = get_client().table("party_aliases").select("short_name,full_name").execute()
-        return pd.DataFrame(resp.data) if resp.data else pd.DataFrame()
-
-    aliases_df = load_party_aliases()
-    if not aliases_df.empty:
-        alias_str = "\n".join(
-            f"  {row['short_name']} = {row['full_name']}"
-            for _, row in aliases_df.iterrows()
-        )
-        ALIAS_CONTEXT = f"\n\nParty Short Name Aliases (use full name in SQL queries):\n{alias_str}"
-    else:
-        ALIAS_CONTEXT = ""
-
     # ── Schema context for SQL generation ─────────────────────────────────────
     DB_SCHEMA = """
 Table: election_results
@@ -1552,6 +1552,22 @@ Notes:
 - To find winner: use ROW_NUMBER() OVER (PARTITION BY constituency, state, election_year, election ORDER BY total_votes DESC) = 1
 """
 
+    # ── Load party aliases ─────────────────────────────────────────────────────
+    @st.cache_data(ttl=300)
+    def load_party_aliases():
+        resp = get_client().table("party_aliases").select("short_name,full_name").execute()
+        return pd.DataFrame(resp.data) if resp.data else pd.DataFrame()
+
+    aliases_df = load_party_aliases()
+    if not aliases_df.empty:
+        alias_str = "\n".join(
+            f"  {row['short_name']} = {row['full_name']}"
+            for _, row in aliases_df.iterrows()
+        )
+        ALIAS_CONTEXT = f"\n\nParty Short Name Aliases (use full name in SQL queries):\n{alias_str}"
+    else:
+        ALIAS_CONTEXT = ""
+
     SQL_SYSTEM = f"""You are a PostgreSQL expert. Generate a single valid SQL SELECT query to answer the user's question.
 The database has this schema:
 {DB_SCHEMA}{ALIAS_CONTEXT}
@@ -1571,20 +1587,7 @@ Rules:
 - Never use total_votes in INSERT/UPDATE — it is a generated column
 - Always include meaningful column aliases for readability
 - When calculating strike rate or win %, use constituencies CONTESTED by the party (rows where that party appears), NOT total constituencies in the state
-  Strike Rate = seats_won / constituencies_contested * 100
-  Example for party strike rate per state:
-  WITH ranked AS (
-    SELECT *, ROW_NUMBER() OVER (PARTITION BY constituency, state, election_year, election ORDER BY total_votes DESC) AS rn
-    FROM election_results
-  )
-  SELECT state,
-    COUNT(DISTINCT constituency) as contested,
-    COUNT(DISTINCT CASE WHEN rn=1 THEN constituency END) as seats_won,
-    ROUND(COUNT(DISTINCT CASE WHEN rn=1 THEN constituency END) * 100.0 / COUNT(DISTINCT constituency), 1) as strike_rate_pct
-  FROM ranked
-  WHERE party ILIKE '%Bharatiya Janata Party%'
-  GROUP BY state
-  ORDER BY seats_won DESC"""
+  Strike Rate = seats_won / constituencies_contested * 100"""
 
     ANSWER_SYSTEM = """You are an Indian election data analyst. 
 You are given a user question and the SQL query result as a data table.
@@ -1598,11 +1601,11 @@ Important rules for analysis:
 - If total seats are not in the data, do not categorize — just report the numbers
 - Always mention both seats won AND win % when total seats are available"""
 
-    # ── Check if admin is logged in ────────────────────────────────────────────
+    # ── Check if admin ─────────────────────────────────────────────────────────
     is_admin_ask = (
-        "admin_key" in st.session_state and
         st.session_state.get("admin_key","") == st.secrets.get("ADMIN_PASSWORD",
             st.secrets.get("admin", {}).get("ADMIN_PASSWORD",""))
+        and st.session_state.get("admin_key","") != ""
     )
 
     question = st.text_input(
@@ -1628,15 +1631,15 @@ Important rules for analysis:
                 import anthropic as ac
                 ai = ac.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
 
-                # Step 1 — Pre-process question: replace short names with full names
+                # Pre-process: replace short names with full names
                 processed_q = question
                 if not aliases_df.empty:
+                    import re
                     for _, row in aliases_df.iterrows():
-                        import re
                         pattern = r'\b' + re.escape(row["short_name"]) + r'\b'
                         processed_q = re.sub(pattern, row["full_name"], processed_q, flags=re.IGNORECASE)
 
-                # Step 2 — Generate SQL
+                # Step 1 — Generate SQL
                 sql_resp = ai.messages.create(
                     model="claude-sonnet-4-20250514",
                     max_tokens=500,
@@ -1645,25 +1648,21 @@ Important rules for analysis:
                 )
                 sql_query = sql_resp.content[0].text.strip().rstrip(";").strip()
 
-                # Step 2 — Run SQL against Supabase via postgrest rpc or direct query
-                # Use supabase postgrest — wrap in rpc call using raw SQL
-                result = get_client().rpc("run_sql", {"query": sql_query}).execute()
+                # Step 2 — Run SQL via Supabase RPC
+                result    = get_client().rpc("run_sql", {"query": sql_query}).execute()
                 result_df = pd.DataFrame(result.data) if result.data else pd.DataFrame()
 
                 # Step 3 — Generate plain English answer
-                result_str = result_df.to_string(index=False) if not result_df.empty else "No results found."
+                result_str  = result_df.to_string(index=False) if not result_df.empty else "No results found."
                 answer_resp = ai.messages.create(
                     model="claude-sonnet-4-20250514",
                     max_tokens=500,
                     system=ANSWER_SYSTEM,
-                    messages=[{
-                        "role": "user",
-                        "content": f"Question: {question}\n\nSQL Result:\n{result_str}"
-                    }],
+                    messages=[{"role":"user","content": f"Question: {question}\n\nSQL Result:\n{result_str}"}],
                 )
                 answer = answer_resp.content[0].text.strip()
 
-                # Step 4 — detect chart request and render
+                # Detect chart request
                 chart_keywords = ["bar chart","bar graph","chart","graph","plot","visuali"]
                 wants_chart = any(k in question.lower() for k in chart_keywords)
                 st.session_state["ask_history"].append((question, sql_query, result_df, answer, wants_chart))
@@ -1676,10 +1675,7 @@ Important rules for analysis:
         for item in reversed(st.session_state["ask_history"]):
             if len(item) < 4:
                 continue
-            q   = item[0]
-            sql_q  = item[1]
-            res_df = item[2]
-            ans    = item[3]
+            q, sql_q, res_df, ans = item[0], item[1], item[2], item[3]
             wants_chart = item[4] if len(item) > 4 else False
 
             st.markdown(
@@ -1697,29 +1693,23 @@ Important rules for analysis:
                 unsafe_allow_html=True,
             )
 
-            # Render chart if requested and data has exactly 2 columns
             if wants_chart and not res_df.empty and len(res_df.columns) >= 2:
                 try:
-                    cols = res_df.columns.tolist()
-                    # Find numeric column for x-axis and label column for y-axis
-                    num_cols  = res_df.select_dtypes(include="number").columns.tolist()
-                    cat_cols  = [c for c in cols if c not in num_cols]
+                    num_cols = res_df.select_dtypes(include="number").columns.tolist()
+                    cat_cols = [c for c in res_df.columns if c not in num_cols]
                     if num_cols and cat_cols:
-                        x_col = num_cols[0]
-                        y_col = cat_cols[0]
+                        x_col, y_col = num_cols[0], cat_cols[0]
                         chart_df = res_df.sort_values(x_col, ascending=True)
-                        fig_ask = px.bar(
-                            chart_df, x=x_col, y=y_col, orientation="h",
-                            color=y_col, text=x_col,
-                            color_discrete_sequence=px.colors.qualitative.Bold,
-                        )
+                        fig_ask  = px.bar(chart_df, x=x_col, y=y_col, orientation="h",
+                                          color=y_col, text=x_col,
+                                          color_discrete_sequence=px.colors.qualitative.Bold)
                         fig_ask.update_traces(textposition="outside", textfont=dict(size=14))
                         layout_ask = hbar_layout(len(chart_df), left_margin=220, right_margin=80, title_x=x_col)
                         layout_ask["showlegend"] = False
                         fig_ask.update_layout(**layout_ask)
                         st.plotly_chart(fig_ask, use_container_width=True)
                 except Exception:
-                    pass  # silently skip chart if it fails
+                    pass
 
             if is_admin_ask:
                 with st.expander("🔍 SQL Query Used"):
@@ -1728,11 +1718,6 @@ Important rules for analysis:
                         st.dataframe(res_df, use_container_width=True, hide_index=True)
     else:
         st.info("Ask a question above to get started!")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-
-# ══════════════════════════════════════════════════════════════════════════════
 with tab8:
     col_left, col_right = st.columns(2)
 
@@ -1796,10 +1781,7 @@ with tab8:
         st.markdown(about_html, unsafe_allow_html=True)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 6 · Ask Data
-# ══════════════════════════════════════════════════════════════════════════════
-
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 6 · Ask Data
+# TAB 7 · Ask Data
+# ══════════════════════════════════════════════════════════════════════════════
