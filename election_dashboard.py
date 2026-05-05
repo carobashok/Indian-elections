@@ -956,7 +956,7 @@ with tab6:
             cmp_year_b = st.selectbox("Year B (Compare)", years_b, key="cmp_year_b")
         else:
             st.warning("Need at least 2 years of data for this election type.")
-            st.stop()
+            cmp_year_b = None
 
     # State filter
     is_loksabha_cmp = "lok sabha" in cmp_election.lower() or "loksabha" in cmp_election.lower()
@@ -967,557 +967,560 @@ with tab6:
 
     st.divider()
 
-    # ── Compare button — data only loads when clicked ─────────────────────────
-    if st.button("🔍 Compare", type="primary", key="compare_btn"):
-        st.session_state["compare_triggered"] = True
-        st.session_state["compare_params"] = (cmp_year_a, cmp_year_b, cmp_state, cmp_election)
+    _compare_ok = False  # flag to gate all comparison rendering
 
-    # Only load and show data if compare has been triggered
-    if not st.session_state.get("compare_triggered"):
-        st.info("Select your filters above and click **Compare** to see the results.")
-        st.stop()
+    if cmp_year_b is None:
+        pass  # warning already shown
+    else:
+        # ── Compare button ─────────────────────────────────────────────────────
+        if st.button("🔍 Compare", type="primary", key="compare_btn"):
+            st.session_state["compare_triggered"] = True
+            st.session_state["compare_params"] = (cmp_year_a, cmp_year_b, cmp_state, cmp_election)
 
-    # If filters changed since last compare, prompt again
-    current_params = (cmp_year_a, cmp_year_b, cmp_state, cmp_election)
-    if st.session_state.get("compare_params") != current_params:
-        st.warning("Filters changed — click **Compare** again to refresh results.")
-        st.stop()
+        if not st.session_state.get("compare_triggered"):
+            st.info("Select your filters above and click **Compare** to see the results.")
+        else:
+            current_params = (cmp_year_a, cmp_year_b, cmp_state, cmp_election)
+            if st.session_state.get("compare_params") != current_params:
+                st.warning("Filters changed — click **Compare** again to refresh results.")
+            else:
+                df_a = load_data(cmp_year_a, cmp_state, cmp_election)
+                df_b = load_data(cmp_year_b, cmp_state, cmp_election)
+                if df_a.empty or df_b.empty:
+                    st.warning("Not enough data for comparison. Please check if both years have data loaded.")
+                else:
+                    _compare_ok = True
 
-    # ── Load data for both years ───────────────────────────────────────────────
-    df_a = load_data(cmp_year_a, cmp_state, cmp_election)
-    df_b = load_data(cmp_year_b, cmp_state, cmp_election)
-
-    if df_a.empty or df_b.empty:
-        st.warning("Not enough data for comparison. Please check if both years have data loaded.")
-        st.stop()
+    if _compare_ok:
+        pass  # placeholder — sub-tabs follow
 
     # ── Sub-tabs ───────────────────────────────────────────────────────────────
-    ctab1, ctab2, ctab3, ctab4 = st.tabs([
-        f"🏛️ Party Seats  {cmp_year_a} vs {cmp_year_b}",
-        f"📊 Vote Share Swing  {cmp_year_a} vs {cmp_year_b}",
-        f"🤝 Alliance  {cmp_year_a} vs {cmp_year_b}",
-        f"📍 Constituency  {cmp_year_a} vs {cmp_year_b}",
-    ])
+        ctab1, ctab2, ctab3, ctab4 = st.tabs([
+            f"🏛️ Party Seats  {cmp_year_a} vs {cmp_year_b}",
+            f"📊 Vote Share Swing  {cmp_year_a} vs {cmp_year_b}",
+            f"🤝 Alliance  {cmp_year_a} vs {cmp_year_b}",
+            f"📍 Constituency  {cmp_year_a} vs {cmp_year_b}",
+        ])
 
-    # ── Helper: compute winners ────────────────────────────────────────────────
-    def get_winners(df):
-        df2 = df.copy()
-        df2["rank"] = df2.groupby("constituency")["total_votes"].rank(method="first", ascending=False).astype(int)
-        return df2[df2["rank"] == 1][["constituency", "candidate", "party", "total_votes"]].copy()
+        # ── Helper: compute winners ────────────────────────────────────────────────
+        def get_winners(df):
+            df2 = df.copy()
+            df2["rank"] = df2.groupby("constituency")["total_votes"].rank(method="first", ascending=False).astype(int)
+            return df2[df2["rank"] == 1][["constituency", "candidate", "party", "total_votes"]].copy()
 
-    winners_a = get_winners(df_a)
-    winners_b = get_winners(df_b)
+        winners_a = get_winners(df_a)
+        winners_b = get_winners(df_b)
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # Sub-tab 1 · Party Seats Comparison
-    # ══════════════════════════════════════════════════════════════════════════
-    with ctab1:
-        seats_a = winners_a.groupby("party").size().reset_index(name=str(cmp_year_a))
-        seats_b = winners_b.groupby("party").size().reset_index(name=str(cmp_year_b))
+        # ══════════════════════════════════════════════════════════════════════════
+        # Sub-tab 1 · Party Seats Comparison
+        # ══════════════════════════════════════════════════════════════════════════
+        with ctab1:
+            seats_a = winners_a.groupby("party").size().reset_index(name=str(cmp_year_a))
+            seats_b = winners_b.groupby("party").size().reset_index(name=str(cmp_year_b))
 
-        seats_cmp = seats_a.merge(seats_b, on="party", how="outer").fillna(0)
-        seats_cmp[str(cmp_year_a)] = seats_cmp[str(cmp_year_a)].astype(int)
-        seats_cmp[str(cmp_year_b)] = seats_cmp[str(cmp_year_b)].astype(int)
-        seats_cmp["Change"]  = seats_cmp[str(cmp_year_b)] - seats_cmp[str(cmp_year_a)]
-        seats_cmp = seats_cmp.sort_values(str(cmp_year_b), ascending=False).reset_index(drop=True)
+            seats_cmp = seats_a.merge(seats_b, on="party", how="outer").fillna(0)
+            seats_cmp[str(cmp_year_a)] = seats_cmp[str(cmp_year_a)].astype(int)
+            seats_cmp[str(cmp_year_b)] = seats_cmp[str(cmp_year_b)].astype(int)
+            seats_cmp["Change"]  = seats_cmp[str(cmp_year_b)] - seats_cmp[str(cmp_year_a)]
+            seats_cmp = seats_cmp.sort_values(str(cmp_year_b), ascending=False).reset_index(drop=True)
 
-        # Chart — grouped bar
-        top_parties = seats_cmp.head(15)
-        fig_cmp = go.Figure()
-        fig_cmp.add_trace(go.Bar(
-            name=str(cmp_year_a),
-            x=top_parties["party"].apply(lambda p: shorten(p, 20)),
-            y=top_parties[str(cmp_year_a)],
-            marker_color="#378ADD",
-            text=top_parties[str(cmp_year_a)],
-            textposition="outside",
-            textfont=dict(size=12),
-        ))
-        fig_cmp.add_trace(go.Bar(
-            name=str(cmp_year_b),
-            x=top_parties["party"].apply(lambda p: shorten(p, 20)),
-            y=top_parties[str(cmp_year_b)],
-            marker_color="#1D9E75",
-            text=top_parties[str(cmp_year_b)],
-            textposition="outside",
-            textfont=dict(size=12),
-        ))
-        fig_cmp.update_layout(
-            barmode="group",
-            height=420,
-            plot_bgcolor="white",
-            paper_bgcolor="white",
-            font=FONT,
-            bargap=0.25,
-            bargroupgap=0.1,
-            xaxis=dict(tickfont=dict(size=12, color="#1a1a2e"), tickangle=-30),
-            yaxis=dict(title="Seats Won", showgrid=True, gridcolor="#f3f4f6", tickfont=dict(size=12, color="#1a1a2e")),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=13, color="#1a1a2e")),
-            margin=dict(l=20, r=20, t=50, b=80),
-        )
-        st.plotly_chart(fig_cmp, use_container_width=True)
-
-        # Table
-        st.markdown('<div class="section-title">Seats Won — Detail</div>', unsafe_allow_html=True)
-
-        def fmt_change(v):
-            if v > 0:   return f"▲ {v}"
-            elif v < 0: return f"▼ {abs(v)}"
-            else:       return "—"
-
-        disp_seats = seats_cmp.copy()
-        disp_seats["Change"] = disp_seats["Change"].apply(fmt_change)
-
-        st.dataframe(
-            disp_seats,
-            use_container_width=True,
-            hide_index=True,
-            height=min(500, 40 + len(disp_seats) * 38),
-            column_config={
-                "party":          st.column_config.TextColumn("Party", width="large"),
-                str(cmp_year_a):  st.column_config.NumberColumn(str(cmp_year_a), format="%d"),
-                str(cmp_year_b):  st.column_config.NumberColumn(str(cmp_year_b), format="%d"),
-                "Change":         st.column_config.TextColumn("Change"),
-            },
-        )
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # Sub-tab 2 · Vote Share Swing
-    # ══════════════════════════════════════════════════════════════════════════
-    with ctab2:
-        # Compute vote share per party for each year
-        def vote_share(df):
-            total = df["total_votes"].sum()
-            vs = df.groupby("party")["total_votes"].sum().reset_index()
-            vs["share"] = (vs["total_votes"] / total * 100).round(2)
-            return vs[["party", "share"]]
-
-        vs_a = vote_share(df_a).rename(columns={"share": str(cmp_year_a)})
-        vs_b = vote_share(df_b).rename(columns={"share": str(cmp_year_b)})
-
-        vs_cmp = vs_a.merge(vs_b, on="party", how="outer").fillna(0)
-        vs_cmp[str(cmp_year_a)] = vs_cmp[str(cmp_year_a)].round(2)
-        vs_cmp[str(cmp_year_b)] = vs_cmp[str(cmp_year_b)].round(2)
-        vs_cmp["Swing"] = (vs_cmp[str(cmp_year_b)] - vs_cmp[str(cmp_year_a)]).round(2)
-        vs_cmp = vs_cmp[vs_cmp[[str(cmp_year_a), str(cmp_year_b)]].max(axis=1) >= 1.0]  # filter tiny parties
-        vs_cmp = vs_cmp.sort_values("Swing", ascending=False).reset_index(drop=True)
-
-        # Swing bar chart
-        colors_swing = ["#1D9E75" if v >= 0 else "#E24B4A" for v in vs_cmp["Swing"]]
-        fig_swing = go.Figure(go.Bar(
-            x=vs_cmp["Swing"],
-            y=vs_cmp["party"].apply(lambda p: shorten(p, 28)),
-            orientation="h",
-            marker_color=colors_swing,
-            text=vs_cmp["Swing"].apply(lambda v: f"{'▲' if v>=0 else '▼'} {abs(v):.1f}%"),
-            textposition="outside",
-            textfont=dict(size=13, color="#111111"),
-        ))
-        fig_swing.update_layout(
-            height=max(350, len(vs_cmp) * 40),
-            plot_bgcolor="white",
-            paper_bgcolor="white",
-            font=FONT,
-            xaxis=dict(
-                title="Vote share swing (%)",
-                showgrid=True, gridcolor="#f3f4f6",
-                tickfont=dict(size=12, color="#1a1a2e"),
-                ticksuffix="%",
-                title_font=dict(color="#1a1a2e"),
-            ),
-            yaxis=dict(tickfont=dict(size=13, color="#1a1a2e"), automargin=True),
-            margin=dict(l=20, r=120, t=30, b=20),
-        )
-        st.plotly_chart(fig_swing, use_container_width=True)
-
-        # Table
-        st.markdown('<div class="section-title">Vote Share — Detail</div>', unsafe_allow_html=True)
-
-        def fmt_swing(v):
-            if v > 0:   return f"▲ {v:.1f}%"
-            elif v < 0: return f"▼ {abs(v):.1f}%"
-            else:       return "—"
-
-        disp_vs = vs_cmp.copy()
-        disp_vs["Swing"] = disp_vs["Swing"].apply(fmt_swing)
-
-        st.dataframe(
-            disp_vs,
-            use_container_width=True,
-            hide_index=True,
-            height=min(500, 40 + len(disp_vs) * 38),
-            column_config={
-                "party":          st.column_config.TextColumn("Party",         width="large"),
-                str(cmp_year_a):  st.column_config.NumberColumn(str(cmp_year_a), format="%.2f%%"),
-                str(cmp_year_b):  st.column_config.NumberColumn(str(cmp_year_b), format="%.2f%%"),
-                "Swing":          st.column_config.TextColumn("Swing"),
-            },
-        )
-
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # Compare Sub-tab 3 · Alliance Comparison
-    # ══════════════════════════════════════════════════════════════════════════
-    with ctab3:
-
-        @st.cache_data(ttl=300)
-        def load_alliance_map(year, election, state):
-            resp = get_client().table("alliances").select("*") \
-                .eq("election_year", year).eq("election", election).execute()
-            all_df = pd.DataFrame(resp.data)
-            if all_df.empty:
-                return pd.DataFrame()
-            if "constituency" not in all_df.columns:
-                all_df["constituency"] = None
-            # constituency-level overrides state-level overrides national
-            const_df = all_df[all_df["constituency"].notna()].copy()
-            nat_df   = all_df[all_df["state"].isna() & all_df["constituency"].isna()].copy()
-            if state and state != "All States":
-                state_df = all_df[(all_df["state"]==state) & all_df["constituency"].isna()].copy()
-            else:
-                state_df = pd.DataFrame()
-            final = nat_df[nat_df["party"] != "Independent"][["alliance_name","party","constituency"]].copy()
-            if not state_df.empty:
-                state_df = state_df[state_df["party"] != "Independent"]
-                final = final[~final["party"].isin(state_df["party"].unique())]
-                final = pd.concat([final, state_df[["alliance_name","party","constituency"]]], ignore_index=True)
-            if not const_df.empty:
-                final = pd.concat([final, const_df[["alliance_name","party","constituency"]]], ignore_index=True)
-            return final.drop_duplicates()
-
-        amap_a = load_alliance_map(cmp_year_a, cmp_election, cmp_state)
-        amap_b = load_alliance_map(cmp_year_b, cmp_election, cmp_state)
-
-        if amap_a.empty and amap_b.empty:
-            st.info("No alliance information available for either year. Upload alliance data via the Admin panel.")
-        else:
-            # Merge alliance into winners
-            def add_alliance(winners_df, amap):
-                if amap.empty:
-                    winners_df = winners_df.copy()
-                    winners_df["alliance_name"] = "Others / Unallied"
-                    return winners_df
-                w = winners_df.copy()
-                w["constituency_key"] = w["constituency"].str.strip().str.upper()
-                const_map = amap[amap["constituency"].notna()].copy()
-                party_map = amap[amap["constituency"].isna()][["alliance_name","party"]].copy()
-                w = w.merge(party_map, on="party", how="left")
-                if not const_map.empty:
-                    const_map["constituency_key"] = const_map["constituency"].str.strip().str.upper()
-                    const_map = const_map.rename(columns={"alliance_name":"alliance_const"})
-                    w = w.merge(const_map[["alliance_const","party","constituency_key"]], on=["party","constituency_key"], how="left")
-                    mask = w["alliance_const"].notna()
-                    w.loc[mask, "alliance_name"] = w.loc[mask, "alliance_const"]
-                    w = w.drop(columns=["alliance_const"], errors="ignore")
-                w = w.drop(columns=["constituency_key"], errors="ignore")
-                w["alliance_name"] = w["alliance_name"].fillna("Others / Unallied")
-                return w
-
-            wa = add_alliance(winners_a, amap_a)
-            wb = add_alliance(winners_b, amap_b)
-
-            # ── Part A — Alliance Seats Comparison ────────────────────────────
-            st.markdown('<div class="section-title">Alliance Seats Comparison</div>', unsafe_allow_html=True)
-            st.caption("Note: Alliance compositions may differ between years — see Party Movement table below.")
-
-            al_seats_a = wa.groupby("alliance_name").size().reset_index(name=str(cmp_year_a))
-            al_seats_b = wb.groupby("alliance_name").size().reset_index(name=str(cmp_year_b))
-            al_cmp = al_seats_a.merge(al_seats_b, on="alliance_name", how="outer").fillna(0)
-            al_cmp[str(cmp_year_a)] = al_cmp[str(cmp_year_a)].astype(int)
-            al_cmp[str(cmp_year_b)] = al_cmp[str(cmp_year_b)].astype(int)
-            al_cmp["Change"] = al_cmp[str(cmp_year_b)] - al_cmp[str(cmp_year_a)]
-            al_cmp = al_cmp.sort_values(str(cmp_year_b), ascending=False).reset_index(drop=True)
-
-            # Grouped bar chart
-            fig_al_cmp = go.Figure()
-            fig_al_cmp.add_trace(go.Bar(
+            # Chart — grouped bar
+            top_parties = seats_cmp.head(15)
+            fig_cmp = go.Figure()
+            fig_cmp.add_trace(go.Bar(
                 name=str(cmp_year_a),
-                x=al_cmp["alliance_name"].apply(lambda p: shorten(p, 20)),
-                y=al_cmp[str(cmp_year_a)],
+                x=top_parties["party"].apply(lambda p: shorten(p, 20)),
+                y=top_parties[str(cmp_year_a)],
                 marker_color="#378ADD",
-                text=al_cmp[str(cmp_year_a)],
+                text=top_parties[str(cmp_year_a)],
                 textposition="outside",
                 textfont=dict(size=12),
             ))
-            fig_al_cmp.add_trace(go.Bar(
+            fig_cmp.add_trace(go.Bar(
                 name=str(cmp_year_b),
-                x=al_cmp["alliance_name"].apply(lambda p: shorten(p, 20)),
-                y=al_cmp[str(cmp_year_b)],
+                x=top_parties["party"].apply(lambda p: shorten(p, 20)),
+                y=top_parties[str(cmp_year_b)],
                 marker_color="#1D9E75",
-                text=al_cmp[str(cmp_year_b)],
+                text=top_parties[str(cmp_year_b)],
                 textposition="outside",
                 textfont=dict(size=12),
             ))
-            fig_al_cmp.update_layout(
-                barmode="group", height=400,
-                plot_bgcolor="white", paper_bgcolor="white", font=FONT,
-                bargap=0.25, bargroupgap=0.1,
-                xaxis=dict(tickfont=dict(size=12, color="#ffffff"), tickangle=-20),
-                yaxis=dict(title="Seats Won", showgrid=True, gridcolor="#f3f4f6",
-                           tickfont=dict(size=12, color="#ffffff")),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=13, color="#ffffff")),
-                margin=dict(l=20, r=20, t=50, b=60),
+            fig_cmp.update_layout(
+                barmode="group",
+                height=420,
+                plot_bgcolor="white",
+                paper_bgcolor="white",
+                font=FONT,
+                bargap=0.25,
+                bargroupgap=0.1,
+                xaxis=dict(tickfont=dict(size=12, color="#1a1a2e"), tickangle=-30),
+                yaxis=dict(title="Seats Won", showgrid=True, gridcolor="#f3f4f6", tickfont=dict(size=12, color="#1a1a2e")),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=13, color="#1a1a2e")),
+                margin=dict(l=20, r=20, t=50, b=80),
             )
-            st.plotly_chart(fig_al_cmp, use_container_width=True)
+            st.plotly_chart(fig_cmp, use_container_width=True)
 
-            # Alliance table with change
+            # Table
+            st.markdown('<div class="section-title">Seats Won — Detail</div>', unsafe_allow_html=True)
+
             def fmt_change(v):
                 if v > 0:   return f"▲ {v}"
                 elif v < 0: return f"▼ {abs(v)}"
                 else:       return "—"
 
-            al_disp = al_cmp.copy()
-            al_disp["Change"] = al_disp["Change"].apply(fmt_change)
+            disp_seats = seats_cmp.copy()
+            disp_seats["Change"] = disp_seats["Change"].apply(fmt_change)
+
             st.dataframe(
-                al_disp, use_container_width=True, hide_index=True,
-                height=min(400, 40 + len(al_disp) * 38),
+                disp_seats,
+                use_container_width=True,
+                hide_index=True,
+                height=min(500, 40 + len(disp_seats) * 38),
                 column_config={
-                    "alliance_name": st.column_config.TextColumn("Alliance", width="medium"),
-                    str(cmp_year_a): st.column_config.NumberColumn(str(cmp_year_a), format="%d"),
-                    str(cmp_year_b): st.column_config.NumberColumn(str(cmp_year_b), format="%d"),
-                    "Change":        st.column_config.TextColumn("Change"),
+                    "party":          st.column_config.TextColumn("Party", width="large"),
+                    str(cmp_year_a):  st.column_config.NumberColumn(str(cmp_year_a), format="%d"),
+                    str(cmp_year_b):  st.column_config.NumberColumn(str(cmp_year_b), format="%d"),
+                    "Change":         st.column_config.TextColumn("Change"),
                 },
             )
 
-            # ── Part B — Party Movement Table ─────────────────────────────────
-            st.markdown('<div class="section-title">Party Alliance Movement</div>', unsafe_allow_html=True)
-            st.caption("Shows parties that switched alliances or joined/left between the two years.")
+        # ══════════════════════════════════════════════════════════════════════════
+        # Sub-tab 2 · Vote Share Swing
+        # ══════════════════════════════════════════════════════════════════════════
+        with ctab2:
+            # Compute vote share per party for each year
+            def vote_share(df):
+                total = df["total_votes"].sum()
+                vs = df.groupby("party")["total_votes"].sum().reset_index()
+                vs["share"] = (vs["total_votes"] / total * 100).round(2)
+                return vs[["party", "share"]]
 
-            # Build party → alliance map for each year
-            def party_alliance_map(amap):
-                if amap.empty:
-                    return {}
-                # only party-level (no constituency specific)
-                pm = amap[amap["constituency"].isna()][["party","alliance_name"]].drop_duplicates()
-                return dict(zip(pm["party"], pm["alliance_name"]))
+            vs_a = vote_share(df_a).rename(columns={"share": str(cmp_year_a)})
+            vs_b = vote_share(df_b).rename(columns={"share": str(cmp_year_b)})
 
-            pm_a = party_alliance_map(amap_a)
-            pm_b = party_alliance_map(amap_b)
+            vs_cmp = vs_a.merge(vs_b, on="party", how="outer").fillna(0)
+            vs_cmp[str(cmp_year_a)] = vs_cmp[str(cmp_year_a)].round(2)
+            vs_cmp[str(cmp_year_b)] = vs_cmp[str(cmp_year_b)].round(2)
+            vs_cmp["Swing"] = (vs_cmp[str(cmp_year_b)] - vs_cmp[str(cmp_year_a)]).round(2)
+            vs_cmp = vs_cmp[vs_cmp[[str(cmp_year_a), str(cmp_year_b)]].max(axis=1) >= 1.0]  # filter tiny parties
+            vs_cmp = vs_cmp.sort_values("Swing", ascending=False).reset_index(drop=True)
 
-            all_parties = set(list(pm_a.keys()) + list(pm_b.keys()))
-            movement = []
-            for party in sorted(all_parties):
-                al_a = pm_a.get(party, "Others / Unallied")
-                al_b = pm_b.get(party, "Others / Unallied")
-                if al_a != al_b:
-                    movement.append({
-                        "Party":          party,
-                        f"Alliance {cmp_year_a}": al_a,
-                        f"Alliance {cmp_year_b}": al_b,
-                        "Movement":       f"{shorten(al_a,20)} → {shorten(al_b,20)}",
-                    })
+            # Swing bar chart
+            colors_swing = ["#1D9E75" if v >= 0 else "#E24B4A" for v in vs_cmp["Swing"]]
+            fig_swing = go.Figure(go.Bar(
+                x=vs_cmp["Swing"],
+                y=vs_cmp["party"].apply(lambda p: shorten(p, 28)),
+                orientation="h",
+                marker_color=colors_swing,
+                text=vs_cmp["Swing"].apply(lambda v: f"{'▲' if v>=0 else '▼'} {abs(v):.1f}%"),
+                textposition="outside",
+                textfont=dict(size=13, color="#111111"),
+            ))
+            fig_swing.update_layout(
+                height=max(350, len(vs_cmp) * 40),
+                plot_bgcolor="white",
+                paper_bgcolor="white",
+                font=FONT,
+                xaxis=dict(
+                    title="Vote share swing (%)",
+                    showgrid=True, gridcolor="#f3f4f6",
+                    tickfont=dict(size=12, color="#1a1a2e"),
+                    ticksuffix="%",
+                    title_font=dict(color="#1a1a2e"),
+                ),
+                yaxis=dict(tickfont=dict(size=13, color="#1a1a2e"), automargin=True),
+                margin=dict(l=20, r=120, t=30, b=20),
+            )
+            st.plotly_chart(fig_swing, use_container_width=True)
 
-            if movement:
-                mov_df = pd.DataFrame(movement)
+            # Table
+            st.markdown('<div class="section-title">Vote Share — Detail</div>', unsafe_allow_html=True)
+
+            def fmt_swing(v):
+                if v > 0:   return f"▲ {v:.1f}%"
+                elif v < 0: return f"▼ {abs(v):.1f}%"
+                else:       return "—"
+
+            disp_vs = vs_cmp.copy()
+            disp_vs["Swing"] = disp_vs["Swing"].apply(fmt_swing)
+
+            st.dataframe(
+                disp_vs,
+                use_container_width=True,
+                hide_index=True,
+                height=min(500, 40 + len(disp_vs) * 38),
+                column_config={
+                    "party":          st.column_config.TextColumn("Party",         width="large"),
+                    str(cmp_year_a):  st.column_config.NumberColumn(str(cmp_year_a), format="%.2f%%"),
+                    str(cmp_year_b):  st.column_config.NumberColumn(str(cmp_year_b), format="%.2f%%"),
+                    "Swing":          st.column_config.TextColumn("Swing"),
+                },
+            )
+
+
+        # ══════════════════════════════════════════════════════════════════════════
+        # Compare Sub-tab 3 · Alliance Comparison
+        # ══════════════════════════════════════════════════════════════════════════
+        with ctab3:
+
+            @st.cache_data(ttl=300)
+            def load_alliance_map(year, election, state):
+                resp = get_client().table("alliances").select("*") \
+                    .eq("election_year", year).eq("election", election).execute()
+                all_df = pd.DataFrame(resp.data)
+                if all_df.empty:
+                    return pd.DataFrame()
+                if "constituency" not in all_df.columns:
+                    all_df["constituency"] = None
+                # constituency-level overrides state-level overrides national
+                const_df = all_df[all_df["constituency"].notna()].copy()
+                nat_df   = all_df[all_df["state"].isna() & all_df["constituency"].isna()].copy()
+                if state and state != "All States":
+                    state_df = all_df[(all_df["state"]==state) & all_df["constituency"].isna()].copy()
+                else:
+                    state_df = pd.DataFrame()
+                final = nat_df[nat_df["party"] != "Independent"][["alliance_name","party","constituency"]].copy()
+                if not state_df.empty:
+                    state_df = state_df[state_df["party"] != "Independent"]
+                    final = final[~final["party"].isin(state_df["party"].unique())]
+                    final = pd.concat([final, state_df[["alliance_name","party","constituency"]]], ignore_index=True)
+                if not const_df.empty:
+                    final = pd.concat([final, const_df[["alliance_name","party","constituency"]]], ignore_index=True)
+                return final.drop_duplicates()
+
+            amap_a = load_alliance_map(cmp_year_a, cmp_election, cmp_state)
+            amap_b = load_alliance_map(cmp_year_b, cmp_election, cmp_state)
+
+            if amap_a.empty and amap_b.empty:
+                st.info("No alliance information available for either year. Upload alliance data via the Admin panel.")
+            else:
+                # Merge alliance into winners
+                def add_alliance(winners_df, amap):
+                    if amap.empty:
+                        winners_df = winners_df.copy()
+                        winners_df["alliance_name"] = "Others / Unallied"
+                        return winners_df
+                    w = winners_df.copy()
+                    w["constituency_key"] = w["constituency"].str.strip().str.upper()
+                    const_map = amap[amap["constituency"].notna()].copy()
+                    party_map = amap[amap["constituency"].isna()][["alliance_name","party"]].copy()
+                    w = w.merge(party_map, on="party", how="left")
+                    if not const_map.empty:
+                        const_map["constituency_key"] = const_map["constituency"].str.strip().str.upper()
+                        const_map = const_map.rename(columns={"alliance_name":"alliance_const"})
+                        w = w.merge(const_map[["alliance_const","party","constituency_key"]], on=["party","constituency_key"], how="left")
+                        mask = w["alliance_const"].notna()
+                        w.loc[mask, "alliance_name"] = w.loc[mask, "alliance_const"]
+                        w = w.drop(columns=["alliance_const"], errors="ignore")
+                    w = w.drop(columns=["constituency_key"], errors="ignore")
+                    w["alliance_name"] = w["alliance_name"].fillna("Others / Unallied")
+                    return w
+
+                wa = add_alliance(winners_a, amap_a)
+                wb = add_alliance(winners_b, amap_b)
+
+                # ── Part A — Alliance Seats Comparison ────────────────────────────
+                st.markdown('<div class="section-title">Alliance Seats Comparison</div>', unsafe_allow_html=True)
+                st.caption("Note: Alliance compositions may differ between years — see Party Movement table below.")
+
+                al_seats_a = wa.groupby("alliance_name").size().reset_index(name=str(cmp_year_a))
+                al_seats_b = wb.groupby("alliance_name").size().reset_index(name=str(cmp_year_b))
+                al_cmp = al_seats_a.merge(al_seats_b, on="alliance_name", how="outer").fillna(0)
+                al_cmp[str(cmp_year_a)] = al_cmp[str(cmp_year_a)].astype(int)
+                al_cmp[str(cmp_year_b)] = al_cmp[str(cmp_year_b)].astype(int)
+                al_cmp["Change"] = al_cmp[str(cmp_year_b)] - al_cmp[str(cmp_year_a)]
+                al_cmp = al_cmp.sort_values(str(cmp_year_b), ascending=False).reset_index(drop=True)
+
+                # Grouped bar chart
+                fig_al_cmp = go.Figure()
+                fig_al_cmp.add_trace(go.Bar(
+                    name=str(cmp_year_a),
+                    x=al_cmp["alliance_name"].apply(lambda p: shorten(p, 20)),
+                    y=al_cmp[str(cmp_year_a)],
+                    marker_color="#378ADD",
+                    text=al_cmp[str(cmp_year_a)],
+                    textposition="outside",
+                    textfont=dict(size=12),
+                ))
+                fig_al_cmp.add_trace(go.Bar(
+                    name=str(cmp_year_b),
+                    x=al_cmp["alliance_name"].apply(lambda p: shorten(p, 20)),
+                    y=al_cmp[str(cmp_year_b)],
+                    marker_color="#1D9E75",
+                    text=al_cmp[str(cmp_year_b)],
+                    textposition="outside",
+                    textfont=dict(size=12),
+                ))
+                fig_al_cmp.update_layout(
+                    barmode="group", height=400,
+                    plot_bgcolor="white", paper_bgcolor="white", font=FONT,
+                    bargap=0.25, bargroupgap=0.1,
+                    xaxis=dict(tickfont=dict(size=12, color="#ffffff"), tickangle=-20),
+                    yaxis=dict(title="Seats Won", showgrid=True, gridcolor="#f3f4f6",
+                               tickfont=dict(size=12, color="#ffffff")),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=13, color="#ffffff")),
+                    margin=dict(l=20, r=20, t=50, b=60),
+                )
+                st.plotly_chart(fig_al_cmp, use_container_width=True)
+
+                # Alliance table with change
+                def fmt_change(v):
+                    if v > 0:   return f"▲ {v}"
+                    elif v < 0: return f"▼ {abs(v)}"
+                    else:       return "—"
+
+                al_disp = al_cmp.copy()
+                al_disp["Change"] = al_disp["Change"].apply(fmt_change)
                 st.dataframe(
-                    mov_df[["Party","Movement",f"Alliance {cmp_year_a}",f"Alliance {cmp_year_b}"]],
-                    use_container_width=True, hide_index=True,
-                    height=min(400, 40 + len(mov_df) * 38),
+                    al_disp, use_container_width=True, hide_index=True,
+                    height=min(400, 40 + len(al_disp) * 38),
                     column_config={
-                        "Party":    st.column_config.TextColumn("Party",    width="medium"),
-                        "Movement": st.column_config.TextColumn("Movement", width="large"),
+                        "alliance_name": st.column_config.TextColumn("Alliance", width="medium"),
+                        str(cmp_year_a): st.column_config.NumberColumn(str(cmp_year_a), format="%d"),
+                        str(cmp_year_b): st.column_config.NumberColumn(str(cmp_year_b), format="%d"),
+                        "Change":        st.column_config.TextColumn("Change"),
                     },
                 )
-            else:
-                st.success("No party alliance changes detected between the two years.")
+
+                # ── Part B — Party Movement Table ─────────────────────────────────
+                st.markdown('<div class="section-title">Party Alliance Movement</div>', unsafe_allow_html=True)
+                st.caption("Shows parties that switched alliances or joined/left between the two years.")
+
+                # Build party → alliance map for each year
+                def party_alliance_map(amap):
+                    if amap.empty:
+                        return {}
+                    # only party-level (no constituency specific)
+                    pm = amap[amap["constituency"].isna()][["party","alliance_name"]].drop_duplicates()
+                    return dict(zip(pm["party"], pm["alliance_name"]))
+
+                pm_a = party_alliance_map(amap_a)
+                pm_b = party_alliance_map(amap_b)
+
+                all_parties = set(list(pm_a.keys()) + list(pm_b.keys()))
+                movement = []
+                for party in sorted(all_parties):
+                    al_a = pm_a.get(party, "Others / Unallied")
+                    al_b = pm_b.get(party, "Others / Unallied")
+                    if al_a != al_b:
+                        movement.append({
+                            "Party":          party,
+                            f"Alliance {cmp_year_a}": al_a,
+                            f"Alliance {cmp_year_b}": al_b,
+                            "Movement":       f"{shorten(al_a,20)} → {shorten(al_b,20)}",
+                        })
+
+                if movement:
+                    mov_df = pd.DataFrame(movement)
+                    st.dataframe(
+                        mov_df[["Party","Movement",f"Alliance {cmp_year_a}",f"Alliance {cmp_year_b}"]],
+                        use_container_width=True, hide_index=True,
+                        height=min(400, 40 + len(mov_df) * 38),
+                        column_config={
+                            "Party":    st.column_config.TextColumn("Party",    width="medium"),
+                            "Movement": st.column_config.TextColumn("Movement", width="large"),
+                        },
+                    )
+                else:
+                    st.success("No party alliance changes detected between the two years.")
 
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # Compare Sub-tab 4 · Constituency Analysis
-    # ══════════════════════════════════════════════════════════════════════════
-    with ctab4:
+        # ══════════════════════════════════════════════════════════════════════════
+        # Compare Sub-tab 4 · Constituency Analysis
+        # ══════════════════════════════════════════════════════════════════════════
+        with ctab4:
 
-        # ── Build constituency comparison df ──────────────────────────────────
-        const_a = winners_a[["constituency","candidate","party","total_votes"]].copy()
-        const_b = winners_b[["constituency","candidate","party","total_votes"]].copy()
-        const_a.columns = ["constituency", f"winner_{cmp_year_a}", f"party_{cmp_year_a}", f"votes_{cmp_year_a}"]
-        const_b.columns = ["constituency", f"winner_{cmp_year_b}", f"party_{cmp_year_b}", f"votes_{cmp_year_b}"]
+            # ── Build constituency comparison df ──────────────────────────────────
+            const_a = winners_a[["constituency","candidate","party","total_votes"]].copy()
+            const_b = winners_b[["constituency","candidate","party","total_votes"]].copy()
+            const_a.columns = ["constituency", f"winner_{cmp_year_a}", f"party_{cmp_year_a}", f"votes_{cmp_year_a}"]
+            const_b.columns = ["constituency", f"winner_{cmp_year_b}", f"party_{cmp_year_b}", f"votes_{cmp_year_b}"]
 
-        # Normalize constituency names to uppercase for reliable matching
-        const_a["constituency"] = const_a["constituency"].str.strip().str.upper()
-        const_b["constituency"] = const_b["constituency"].str.strip().str.upper()
+            # Normalize constituency names to uppercase for reliable matching
+            const_a["constituency"] = const_a["constituency"].str.strip().str.upper()
+            const_b["constituency"] = const_b["constituency"].str.strip().str.upper()
 
-        const_cmp = const_a.merge(const_b, on="constituency", how="outer")
+            const_cmp = const_a.merge(const_b, on="constituency", how="outer")
 
-        # Party-level result
-        def party_result(row):
-            pa = row.get(f"party_{cmp_year_a}", None)
-            pb = row.get(f"party_{cmp_year_b}", None)
-            if pd.isna(pa) or pd.isna(pb): return "New/Missing"
-            return "Held" if pa == pb else "Flipped"
-
-        const_cmp["Party Result"] = const_cmp.apply(party_result, axis=1)
-
-        # Alliance-level result (if alliance data exists)
-        has_alliance = not amap_a.empty and not amap_b.empty
-
-        if has_alliance:
-            pm_a_map = party_alliance_map(amap_a)
-            pm_b_map = party_alliance_map(amap_b)
-
-            def alliance_result(row):
+            # Party-level result
+            def party_result(row):
                 pa = row.get(f"party_{cmp_year_a}", None)
                 pb = row.get(f"party_{cmp_year_b}", None)
                 if pd.isna(pa) or pd.isna(pb): return "New/Missing"
-                al_a = pm_a_map.get(pa, "Others / Unallied")
-                al_b = pm_b_map.get(pb, "Others / Unallied")
-                return "Held" if al_a == al_b else "Flipped"
+                return "Held" if pa == pb else "Flipped"
 
-            const_cmp["Alliance Result"] = const_cmp.apply(alliance_result, axis=1)
+            const_cmp["Party Result"] = const_cmp.apply(party_result, axis=1)
 
-        # ── Part A — KPI Summary ───────────────────────────────────────────────
-        st.markdown('<div class="section-title">Flip Summary</div>', unsafe_allow_html=True)
+            # Alliance-level result (if alliance data exists)
+            has_alliance = not amap_a.empty and not amap_b.empty
 
-        p_held    = (const_cmp["Party Result"] == "Held").sum()
-        p_flipped = (const_cmp["Party Result"] == "Flipped").sum()
-        p_new     = (const_cmp["Party Result"] == "New/Missing").sum()
-        total_c   = len(const_cmp)
+            if has_alliance:
+                pm_a_map = party_alliance_map(amap_a)
+                pm_b_map = party_alliance_map(amap_b)
 
-        kpi_cols = st.columns(4) if has_alliance else st.columns(3)
-        kpi(kpi_cols[0], "Total Constituencies", str(total_c), "in comparison")
-        kpi(kpi_cols[1], "Held (Party)",    str(p_held),    f"{p_held/total_c*100:.1f}% unchanged")
-        kpi(kpi_cols[2], "Flipped (Party)", str(p_flipped), f"{p_flipped/total_c*100:.1f}% changed hands")
+                def alliance_result(row):
+                    pa = row.get(f"party_{cmp_year_a}", None)
+                    pb = row.get(f"party_{cmp_year_b}", None)
+                    if pd.isna(pa) or pd.isna(pb): return "New/Missing"
+                    al_a = pm_a_map.get(pa, "Others / Unallied")
+                    al_b = pm_b_map.get(pb, "Others / Unallied")
+                    return "Held" if al_a == al_b else "Flipped"
 
-        if has_alliance:
-            al_held    = (const_cmp["Alliance Result"] == "Held").sum()
-            al_flipped = (const_cmp["Alliance Result"] == "Flipped").sum()
-            kpi(kpi_cols[3], "Held (Alliance)", str(al_held), f"{al_held/total_c*100:.1f}% same alliance")
+                const_cmp["Alliance Result"] = const_cmp.apply(alliance_result, axis=1)
 
-        st.divider()
+            # ── Part A — KPI Summary ───────────────────────────────────────────────
+            st.markdown('<div class="section-title">Flip Summary</div>', unsafe_allow_html=True)
 
-        # ── Part B — Flip Table ────────────────────────────────────────────────
-        st.markdown('<div class="section-title">Constituency-wise Results</div>', unsafe_allow_html=True)
+            p_held    = (const_cmp["Party Result"] == "Held").sum()
+            p_flipped = (const_cmp["Party Result"] == "Flipped").sum()
+            p_new     = (const_cmp["Party Result"] == "New/Missing").sum()
+            total_c   = len(const_cmp)
 
-        # Filter
-        filter_opts = ["All", "Held", "Flipped", "New/Missing"]
-        sel_filter  = st.radio("Show", filter_opts, horizontal=True, key="flip_filter")
+            kpi_cols = st.columns(4) if has_alliance else st.columns(3)
+            kpi(kpi_cols[0], "Total Constituencies", str(total_c), "in comparison")
+            kpi(kpi_cols[1], "Held (Party)",    str(p_held),    f"{p_held/total_c*100:.1f}% unchanged")
+            kpi(kpi_cols[2], "Flipped (Party)", str(p_flipped), f"{p_flipped/total_c*100:.1f}% changed hands")
 
-        disp_const = const_cmp.copy()
-        if sel_filter != "All":
-            disp_const = disp_const[disp_const["Party Result"] == sel_filter]
+            if has_alliance:
+                al_held    = (const_cmp["Alliance Result"] == "Held").sum()
+                al_flipped = (const_cmp["Alliance Result"] == "Flipped").sum()
+                kpi(kpi_cols[3], "Held (Alliance)", str(al_held), f"{al_held/total_c*100:.1f}% same alliance")
 
-        disp_const = disp_const.sort_values("constituency").reset_index(drop=True)
+            st.divider()
 
-        # Rename columns nicely
-        col_rename = {
-            "constituency":         "Constituency",
-            f"winner_{cmp_year_a}": f"Winner {cmp_year_a}",
-            f"party_{cmp_year_a}":  f"Party {cmp_year_a}",
-            f"votes_{cmp_year_a}":  f"Votes {cmp_year_a}",
-            f"winner_{cmp_year_b}": f"Winner {cmp_year_b}",
-            f"party_{cmp_year_b}":  f"Party {cmp_year_b}",
-            f"votes_{cmp_year_b}":  f"Votes {cmp_year_b}",
-            "Party Result":         "Party Result",
-        }
-        if has_alliance:
-            col_rename["Alliance Result"] = "Alliance Result"
+            # ── Part B — Flip Table ────────────────────────────────────────────────
+            st.markdown('<div class="section-title">Constituency-wise Results</div>', unsafe_allow_html=True)
 
-        disp_const = disp_const.rename(columns=col_rename)
-        show_cols  = [c for c in col_rename.values() if c in disp_const.columns]
+            # Filter
+            filter_opts = ["All", "Held", "Flipped", "New/Missing"]
+            sel_filter  = st.radio("Show", filter_opts, horizontal=True, key="flip_filter")
 
-        st.dataframe(
-            disp_const[show_cols],
-            use_container_width=True,
-            hide_index=True,
-            height=min(500, 40 + len(disp_const) * 38),
-            column_config={
-                f"Votes {cmp_year_a}": st.column_config.NumberColumn(format="%d"),
-                f"Votes {cmp_year_b}": st.column_config.NumberColumn(format="%d"),
-                "Party Result":        st.column_config.TextColumn("Party Result"),
-                "Alliance Result":     st.column_config.TextColumn("Alliance Result"),
-            },
-        )
+            disp_const = const_cmp.copy()
+            if sel_filter != "All":
+                disp_const = disp_const[disp_const["Party Result"] == sel_filter]
 
-        st.divider()
+            disp_const = disp_const.sort_values("constituency").reset_index(drop=True)
 
-        # ── Part C — Constituency Deep Dive ───────────────────────────────────
-        st.markdown('<div class="section-title">Constituency Deep Dive</div>', unsafe_allow_html=True)
+            # Rename columns nicely
+            col_rename = {
+                "constituency":         "Constituency",
+                f"winner_{cmp_year_a}": f"Winner {cmp_year_a}",
+                f"party_{cmp_year_a}":  f"Party {cmp_year_a}",
+                f"votes_{cmp_year_a}":  f"Votes {cmp_year_a}",
+                f"winner_{cmp_year_b}": f"Winner {cmp_year_b}",
+                f"party_{cmp_year_b}":  f"Party {cmp_year_b}",
+                f"votes_{cmp_year_b}":  f"Votes {cmp_year_b}",
+                "Party Result":         "Party Result",
+            }
+            if has_alliance:
+                col_rename["Alliance Result"] = "Alliance Result"
 
-        all_consts = sorted(const_cmp["constituency"].dropna().unique())
-        sel_const_cmp = st.selectbox("Select Constituency", all_consts, key="cmp_const")
+            disp_const = disp_const.rename(columns=col_rename)
+            show_cols  = [c for c in col_rename.values() if c in disp_const.columns]
 
-        col_l, col_r = st.columns(2)
+            st.dataframe(
+                disp_const[show_cols],
+                use_container_width=True,
+                hide_index=True,
+                height=min(500, 40 + len(disp_const) * 38),
+                column_config={
+                    f"Votes {cmp_year_a}": st.column_config.NumberColumn(format="%d"),
+                    f"Votes {cmp_year_b}": st.column_config.NumberColumn(format="%d"),
+                    "Party Result":        st.column_config.TextColumn("Party Result"),
+                    "Alliance Result":     st.column_config.TextColumn("Alliance Result"),
+                },
+            )
 
-        # Normalize constituency in main dfs for deep dive lookup
-        df_a["constituency_upper"] = df_a["constituency"].str.strip().str.upper()
-        df_b["constituency_upper"] = df_b["constituency"].str.strip().str.upper()
+            st.divider()
 
-        # Year A detail
-        with col_l:
-            st.markdown(f"**{cmp_year_a}**")
-            cand_a = df_a[df_a["constituency_upper"] == sel_const_cmp].sort_values("total_votes", ascending=False).copy()
-            if not cand_a.empty:
-                total_ca = cand_a["total_votes"].sum()
-                cand_a["Share %"] = (cand_a["total_votes"] / total_ca * 100).round(1)
-                st.dataframe(
-                    cand_a[["candidate","party","total_votes","Share %"]].reset_index(drop=True),
-                    use_container_width=True, hide_index=True,
-                    column_config={
-                        "candidate":   st.column_config.TextColumn("Candidate"),
-                        "party":       st.column_config.TextColumn("Party"),
-                        "total_votes": st.column_config.NumberColumn("Votes", format="%d"),
-                        "Share %":     st.column_config.NumberColumn("Share %", format="%.1f%%"),
-                    },
-                )
-            else:
-                st.info("No data for this constituency in this year.")
+            # ── Part C — Constituency Deep Dive ───────────────────────────────────
+            st.markdown('<div class="section-title">Constituency Deep Dive</div>', unsafe_allow_html=True)
 
-        # Year B detail
-        with col_r:
-            st.markdown(f"**{cmp_year_b}**")
-            cand_b = df_b[df_b["constituency_upper"] == sel_const_cmp].sort_values("total_votes", ascending=False).copy()
-            if not cand_b.empty:
-                total_cb = cand_b["total_votes"].sum()
-                cand_b["Share %"] = (cand_b["total_votes"] / total_cb * 100).round(1)
-                st.dataframe(
-                    cand_b[["candidate","party","total_votes","Share %"]].reset_index(drop=True),
-                    use_container_width=True, hide_index=True,
-                    column_config={
-                        "candidate":   st.column_config.TextColumn("Candidate"),
-                        "party":       st.column_config.TextColumn("Party"),
-                        "total_votes": st.column_config.NumberColumn("Votes", format="%d"),
-                        "Share %":     st.column_config.NumberColumn("Share %", format="%.1f%%"),
-                    },
-                )
-            else:
-                st.info("No data for this constituency in this year.")
+            all_consts = sorted(const_cmp["constituency"].dropna().unique())
+            sel_const_cmp = st.selectbox("Select Constituency", all_consts, key="cmp_const")
 
-        # Winner comparison summary
-        row_a = const_cmp[const_cmp["constituency"] == sel_const_cmp]
-        if not row_a.empty:
-            r = row_a.iloc[0]
-            w_a  = r.get(f"winner_{cmp_year_a}", "—")
-            w_b  = r.get(f"winner_{cmp_year_b}", "—")
-            p_a  = r.get(f"party_{cmp_year_a}",  "—")
-            p_b  = r.get(f"party_{cmp_year_b}",  "—")
-            v_a  = int(r.get(f"votes_{cmp_year_a}", 0)) if pd.notna(r.get(f"votes_{cmp_year_a}")) else 0
-            v_b  = int(r.get(f"votes_{cmp_year_b}", 0)) if pd.notna(r.get(f"votes_{cmp_year_b}")) else 0
-            result = r.get("Party Result", "—")
-            result_color = "#1D9E75" if result == "Held" else "#E24B4A" if result == "Flipped" else "#888"
+            col_l, col_r = st.columns(2)
 
-            st.markdown(f"""
-            <div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:1rem;margin-top:1rem;
-                        border:0.5px solid rgba(255,255,255,0.12);">
-                <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <div style="text-align:center;flex:1;">
-                        <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">{cmp_year_a} WINNER</div>
-                        <div style="font-size:14px;font-weight:600;color:#ffffff;">{w_a}</div>
-                        <div style="font-size:12px;color:#9ca3af;">{p_a}</div>
-                        <div style="font-size:13px;color:#f59e0b;">{v_a:,} votes</div>
-                    </div>
-                    <div style="text-align:center;padding:0 1rem;">
-                        <div style="font-size:20px;">→</div>
-                        <div style="font-size:12px;font-weight:600;color:{result_color};">{result}</div>
-                    </div>
-                    <div style="text-align:center;flex:1;">
-                        <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">{cmp_year_b} WINNER</div>
-                        <div style="font-size:14px;font-weight:600;color:#ffffff;">{w_b}</div>
-                        <div style="font-size:12px;color:#9ca3af;">{p_b}</div>
-                        <div style="font-size:13px;color:#f59e0b;">{v_b:,} votes</div>
+            # Normalize constituency in main dfs for deep dive lookup
+            df_a["constituency_upper"] = df_a["constituency"].str.strip().str.upper()
+            df_b["constituency_upper"] = df_b["constituency"].str.strip().str.upper()
+
+            # Year A detail
+            with col_l:
+                st.markdown(f"**{cmp_year_a}**")
+                cand_a = df_a[df_a["constituency_upper"] == sel_const_cmp].sort_values("total_votes", ascending=False).copy()
+                if not cand_a.empty:
+                    total_ca = cand_a["total_votes"].sum()
+                    cand_a["Share %"] = (cand_a["total_votes"] / total_ca * 100).round(1)
+                    st.dataframe(
+                        cand_a[["candidate","party","total_votes","Share %"]].reset_index(drop=True),
+                        use_container_width=True, hide_index=True,
+                        column_config={
+                            "candidate":   st.column_config.TextColumn("Candidate"),
+                            "party":       st.column_config.TextColumn("Party"),
+                            "total_votes": st.column_config.NumberColumn("Votes", format="%d"),
+                            "Share %":     st.column_config.NumberColumn("Share %", format="%.1f%%"),
+                        },
+                    )
+                else:
+                    st.info("No data for this constituency in this year.")
+
+            # Year B detail
+            with col_r:
+                st.markdown(f"**{cmp_year_b}**")
+                cand_b = df_b[df_b["constituency_upper"] == sel_const_cmp].sort_values("total_votes", ascending=False).copy()
+                if not cand_b.empty:
+                    total_cb = cand_b["total_votes"].sum()
+                    cand_b["Share %"] = (cand_b["total_votes"] / total_cb * 100).round(1)
+                    st.dataframe(
+                        cand_b[["candidate","party","total_votes","Share %"]].reset_index(drop=True),
+                        use_container_width=True, hide_index=True,
+                        column_config={
+                            "candidate":   st.column_config.TextColumn("Candidate"),
+                            "party":       st.column_config.TextColumn("Party"),
+                            "total_votes": st.column_config.NumberColumn("Votes", format="%d"),
+                            "Share %":     st.column_config.NumberColumn("Share %", format="%.1f%%"),
+                        },
+                    )
+                else:
+                    st.info("No data for this constituency in this year.")
+
+            # Winner comparison summary
+            row_a = const_cmp[const_cmp["constituency"] == sel_const_cmp]
+            if not row_a.empty:
+                r = row_a.iloc[0]
+                w_a  = r.get(f"winner_{cmp_year_a}", "—")
+                w_b  = r.get(f"winner_{cmp_year_b}", "—")
+                p_a  = r.get(f"party_{cmp_year_a}",  "—")
+                p_b  = r.get(f"party_{cmp_year_b}",  "—")
+                v_a  = int(r.get(f"votes_{cmp_year_a}", 0)) if pd.notna(r.get(f"votes_{cmp_year_a}")) else 0
+                v_b  = int(r.get(f"votes_{cmp_year_b}", 0)) if pd.notna(r.get(f"votes_{cmp_year_b}")) else 0
+                result = r.get("Party Result", "—")
+                result_color = "#1D9E75" if result == "Held" else "#E24B4A" if result == "Flipped" else "#888"
+
+                st.markdown(f"""
+                <div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:1rem;margin-top:1rem;
+                            border:0.5px solid rgba(255,255,255,0.12);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <div style="text-align:center;flex:1;">
+                            <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">{cmp_year_a} WINNER</div>
+                            <div style="font-size:14px;font-weight:600;color:#ffffff;">{w_a}</div>
+                            <div style="font-size:12px;color:#9ca3af;">{p_a}</div>
+                            <div style="font-size:13px;color:#f59e0b;">{v_a:,} votes</div>
+                        </div>
+                        <div style="text-align:center;padding:0 1rem;">
+                            <div style="font-size:20px;">→</div>
+                            <div style="font-size:12px;font-weight:600;color:{result_color};">{result}</div>
+                        </div>
+                        <div style="text-align:center;flex:1;">
+                            <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">{cmp_year_b} WINNER</div>
+                            <div style="font-size:14px;font-weight:600;color:#ffffff;">{w_b}</div>
+                            <div style="font-size:12px;color:#9ca3af;">{p_b}</div>
+                            <div style="font-size:13px;color:#f59e0b;">{v_b:,} votes</div>
+                        </div>
                     </div>
                 </div>
-            </div>
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
 
 with tab7:
     st.markdown('<div class="section-title">Ask Data</div>', unsafe_allow_html=True)
