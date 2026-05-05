@@ -896,9 +896,11 @@ with tab5:
     st.plotly_chart(fig_cand, use_container_width=True)
 
     total_c = cand_df["total_votes"].sum()
-    w_row   = cand_df[cand_df["candidate"]==winner_name].iloc[0]
-    r_row   = cand_df.sort_values("total_votes", ascending=False).iloc[1]
+    sorted_cand = cand_df.sort_values("total_votes", ascending=False)
+    w_row   = sorted_cand.iloc[0]   # highest votes = winner
+    r_row   = sorted_cand.iloc[1]   # second highest = runner up
     margin  = int(w_row["total_votes"]) - int(r_row["total_votes"])
+    winner_name = w_row["candidate"]  # ensure consistency
 
     m1,m2,m3 = st.columns(3)
     m1.metric("🏆 Winner",         w_row["candidate"],  w_row["party"])
