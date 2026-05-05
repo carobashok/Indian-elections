@@ -1708,60 +1708,27 @@ Important rules for analysis:
 
 # ══════════════════════════════════════════════════════════════════════════════
 with tab8:
-    @st.cache_data(ttl=600)
-    def load_elections_list():
-        resp = get_client().table("election_results").select("election_year,state,election").execute()
-        edf = pd.DataFrame(resp.data)
-        if not edf.empty:
-            edf["state"]    = edf["state"].str.strip()
-            edf["election"] = edf["election"].str.strip()
-            edf = edf.drop_duplicates().sort_values(["election_year","election","state"], ascending=[False,True,True])
-        return edf
-
     col_left, col_right = st.columns(2)
 
     with col_left:
         st.markdown('<div class="section-title">Elections Available</div>', unsafe_allow_html=True)
-        el_list = load_elections_list()
-        if not el_list.empty:
-            # Load constituency counts
-            seats_resp = get_client().table("election_results")                 .select("election_year,state,election,constituency").execute()
-            seats_df = pd.DataFrame(seats_resp.data)
-            seats_df["state"]    = seats_df["state"].str.strip()
-            seats_df["election"] = seats_df["election"].str.strip()
-            seats_df["constituency"] = seats_df["constituency"].str.strip()
-
-            rows = []
-            for _, grp in seats_df.groupby(["election_year","election","state"]):
-                pass  # handled below
-
-            # Build summary
+        # Reuse fdf — no extra DB call
+        if not fdf.empty:
             summary = []
-            for (year, election), grp in seats_df.groupby(["election_year","election"]):
-                is_loksabha = "lok sabha" in election.lower() or "loksabha" in election.lower()
-                if is_loksabha:
-                    seats = grp["constituency"].nunique()
-                    summary.append({"Election": election, "Year": year,
-                                    "State": "All States", "Seats": seats})
+            for (year, election), grp in fdf.groupby(["election_year","election"]):
+                is_lok = "lok sabha" in election.lower() or "loksabha" in election.lower()
+                if is_lok:
+                    summary.append({"Election": election, "Year": int(year), "State": "All States"})
                 else:
-                    for state, sgrp in grp.groupby("state"):
-                        seats = sgrp["constituency"].nunique()
-                        summary.append({"Election": election, "Year": year,
-                                        "State": state, "Seats": seats})
-
+                    for state in sorted(grp["state"].unique()):
+                        summary.append({"Election": election, "Year": int(year), "State": state})
             summary_df = pd.DataFrame(summary).sort_values(
                 ["Year","Election","State"], ascending=[False,True,True]
             ).reset_index(drop=True)
-
             st.dataframe(
-                summary_df,
-                use_container_width=True,
-                hide_index=True,
+                summary_df, use_container_width=True, hide_index=True,
                 height=min(500, 40 + len(summary_df) * 38),
-                column_config={
-                    "Seats": st.column_config.NumberColumn("Seats", format="%d"),
-                    "Year":  st.column_config.NumberColumn("Year",  format="%d"),
-                },
+                column_config={"Year": st.column_config.NumberColumn("Year", format="%d")},
             )
         else:
             st.info("No elections loaded yet.")
