@@ -995,11 +995,12 @@ with tab6:
         pass  # placeholder — sub-tabs follow
 
     # ── Sub-tabs ───────────────────────────────────────────────────────────────
-        ctab1, ctab2, ctab3, ctab4 = st.tabs([
+        ctab1, ctab2, ctab3, ctab4, ctab5 = st.tabs([
             f"🏛️ Party Seats  {cmp_year_a} vs {cmp_year_b}",
             f"📊 Vote Share Swing  {cmp_year_a} vs {cmp_year_b}",
             f"🤝 Alliance  {cmp_year_a} vs {cmp_year_b}",
             f"📍 Constituency  {cmp_year_a} vs {cmp_year_b}",
+            f"🆕 New Entrant Impact  {cmp_year_a} vs {cmp_year_b}",
         ])
 
         # ── Helper: compute winners ────────────────────────────────────────────────
@@ -1521,6 +1522,197 @@ with tab6:
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
+
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Compare Sub-tab 5 · New Entrant Impact
+        # ══════════════════════════════════════════════════════════════════════
+        with ctab5:
+
+            # ── Detect new entrants ───────────────────────────────────────────
+            parties_a = set(df_a[df_a["party"] != "None of the Above"]["party"].unique())
+            parties_b = set(df_b[df_b["party"] != "None of the Above"]["party"].unique())
+            new_entrants = sorted(parties_b - parties_a)
+
+            # Also include parties with negligible presence in Year A (< 0.5% vote share)
+            vs_a_total = df_a["total_votes"].sum()
+            party_share_a = df_a.groupby("party")["total_votes"].sum() / vs_a_total * 100
+            minor_in_a = set(party_share_a[party_share_a < 0.5].index)
+            new_or_minor = sorted((parties_b - parties_a) | (parties_b & minor_in_a))
+
+            if not new_entrants:
+                st.info(f"No new parties detected in {cmp_year_b} that were absent in {cmp_year_a}.")
+            else:
+                st.markdown(
+                    f'<div class="section-title">New Entrants in {cmp_year_b}</div>',
+                    unsafe_allow_html=True
+                )
+                st.caption(f"Parties that contested in {cmp_year_b} but were absent in {cmp_year_a}")
+
+                # Show new entrants as badges
+                badge_html = " ".join([
+                    f'<span style="background:#1a1a2e;border:1px solid #f59e0b;color:#f59e0b;'
+                    f'padding:4px 12px;border-radius:20px;font-size:13px;margin:4px;">{p}</span>'
+                    for p in new_entrants
+                ])
+                st.markdown(badge_html, unsafe_allow_html=True)
+                st.markdown("")
+
+                # Select entrant to analyse
+                sel_entrant = st.selectbox(
+                    "Select new entrant to analyse",
+                    new_entrants, key="sel_entrant"
+                )
+
+                # Constituencies where new entrant contested in Year B
+                entrant_consts = set(
+                    df_b[df_b["party"] == sel_entrant]["constituency"].str.strip().str.upper().unique()
+                )
+                n_contested = len(entrant_consts)
+
+                # New entrant stats
+                entrant_votes   = df_b[df_b["party"] == sel_entrant]["total_votes"].sum()
+                total_votes_b   = df_b["total_votes"].sum()
+                entrant_share   = entrant_votes / total_votes_b * 100 if total_votes_b > 0 else 0
+                entrant_winners = winners_b[winners_b["party"] == sel_entrant]
+                entrant_seats   = len(entrant_winners)
+
+                # KPIs
+                k1, k2, k3, k4 = st.columns(4)
+                kpi(k1, "Constituencies Contested", str(n_contested),      f"by {shorten(sel_entrant, 20)}")
+                kpi(k2, "Seats Won",                str(entrant_seats),    f"in {cmp_year_b}")
+                kpi(k3, "Total Votes",              f"{entrant_votes/1_00_000:.2f}L", "lakh votes")
+                kpi(k4, "Vote Share",               f"{entrant_share:.2f}%", f"of total in {cmp_year_b}")
+
+                st.divider()
+
+                # ── Overall State Analysis ────────────────────────────────────
+                st.markdown('<div class="section-title">Overall Vote Impact (State Level)</div>', unsafe_allow_html=True)
+                st.caption(f"Comparing party vote shares in constituencies where {shorten(sel_entrant,25)} contested")
+
+                # Filter both years to only constituencies where entrant contested
+                df_a_impact = df_a[df_a["constituency"].str.strip().str.upper().isin(entrant_consts)].copy()
+                df_b_impact = df_b[df_b["constituency"].str.strip().str.upper().isin(entrant_consts)].copy()
+
+                if df_a_impact.empty or df_b_impact.empty:
+                    st.warning("Not enough data to compute impact.")
+                else:
+                    total_a_imp = df_a_impact["total_votes"].sum()
+                    total_b_imp = df_b_impact["total_votes"].sum()
+
+                    vs_a_imp = (
+                        df_a_impact.groupby("party")["total_votes"].sum()
+                        .reset_index()
+                    )
+                    vs_a_imp["share_a"] = (vs_a_imp["total_votes"] / total_a_imp * 100).round(2)
+
+                    vs_b_imp = (
+                        df_b_impact[df_b_impact["party"] != sel_entrant]
+                        .groupby("party")["total_votes"].sum()
+                        .reset_index()
+                    )
+                    vs_b_imp["share_b"] = (vs_b_imp["total_votes"] / total_b_imp * 100).round(2)
+
+                    impact = vs_a_imp[["party","share_a"]].merge(
+                        vs_b_imp[["party","share_b"]], on="party", how="outer"
+                    ).fillna(0)
+                    impact["swing"] = (impact["share_b"] - impact["share_a"]).round(2)
+                    impact = impact[impact[["share_a","share_b"]].max(axis=1) >= 0.5]
+                    impact = impact.sort_values("swing", ascending=True).reset_index(drop=True)
+
+                    # Chart — swing per party
+                    colors_imp = ["#E24B4A" if v < 0 else "#1D9E75" for v in impact["swing"]]
+                    fig_imp = go.Figure(go.Bar(
+                        x=impact["swing"],
+                        y=impact["party"].apply(lambda p: shorten(p, 28)),
+                        orientation="h",
+                        marker_color=colors_imp,
+                        text=impact["swing"].apply(lambda v: f"{'▲' if v>=0 else '▼'} {abs(v):.1f}%"),
+                        textposition="outside",
+                        textfont=dict(size=13, color="#1a1a2e"),
+                        hovertemplate="<b>%{y}</b><br>Share {}: %{{customdata[0]:.1f}}%<br>Share {}: %{{customdata[1]:.1f}}%<br>Swing: %{{x:.1f}}%<extra></extra>".format(cmp_year_a, cmp_year_b),
+                        customdata=impact[["share_a","share_b"]].values,
+                    ))
+                    fig_imp.update_layout(
+                        height=max(350, len(impact) * 42),
+                        plot_bgcolor="white", paper_bgcolor="white", font=FONT,
+                        xaxis=dict(title="Vote Share Swing (%)", showgrid=True,
+                                   gridcolor="#f3f4f6", tickfont=dict(size=13, color="#1a1a2e"),
+                                   ticksuffix="%", title_font=dict(color="#1a1a2e")),
+                        yaxis=dict(tickfont=dict(size=13, color="#1a1a2e"), automargin=True),
+                        margin=dict(l=20, r=120, t=30, b=20),
+                    )
+                    st.plotly_chart(fig_imp, use_container_width=True)
+
+                    # Table
+                    st.markdown('<div class="section-title">Party-wise Vote Share Detail</div>', unsafe_allow_html=True)
+                    disp_imp = impact.rename(columns={
+                        "party":   "Party",
+                        "share_a": f"Share % {cmp_year_a}",
+                        "share_b": f"Share % {cmp_year_b}",
+                        "swing":   "Swing %",
+                    }).sort_values("Swing %", ascending=True)
+
+                    st.dataframe(
+                        disp_imp, use_container_width=True, hide_index=True,
+                        height=min(500, 40 + len(disp_imp) * 38),
+                        column_config={
+                            "Party":                st.column_config.TextColumn("Party", width="large"),
+                            f"Share % {cmp_year_a}": st.column_config.NumberColumn(format="%.2f%%"),
+                            f"Share % {cmp_year_b}": st.column_config.NumberColumn(format="%.2f%%"),
+                            "Swing %":              st.column_config.NumberColumn(format="%.2f%%"),
+                        },
+                    )
+
+                st.divider()
+
+                # ── Constituency Deep Dive ────────────────────────────────────
+                st.markdown('<div class="section-title">Constituency Deep Dive</div>', unsafe_allow_html=True)
+                st.caption(f"Select a constituency where {shorten(sel_entrant,25)} contested in {cmp_year_b}")
+
+                entrant_const_list = sorted(
+                    df_b[df_b["party"]==sel_entrant]["constituency"].str.strip().unique()
+                )
+                sel_imp_const = st.selectbox(
+                    "Select Constituency", entrant_const_list, key="imp_const"
+                )
+
+                col_imp_l, col_imp_r = st.columns(2)
+
+                with col_imp_l:
+                    st.markdown(f"**{cmp_year_a}** (before {shorten(sel_entrant,15)} existed)")
+                    c_imp_a = df_a[df_a["constituency"].str.strip() == sel_imp_const]                         .sort_values("total_votes", ascending=False).copy()
+                    if not c_imp_a.empty:
+                        tot_a = c_imp_a["total_votes"].sum()
+                        c_imp_a["Share %"] = (c_imp_a["total_votes"] / tot_a * 100).round(1)
+                        st.dataframe(
+                            c_imp_a[["candidate","party","total_votes","Share %"]].reset_index(drop=True),
+                            use_container_width=True, hide_index=True,
+                            column_config={
+                                "total_votes": st.column_config.NumberColumn("Votes", format="%d"),
+                                "Share %":     st.column_config.NumberColumn(format="%.1f%%"),
+                            },
+                        )
+                    else:
+                        st.info("No data for this constituency in this year.")
+
+                with col_imp_r:
+                    st.markdown(f"**{cmp_year_b}** (with {shorten(sel_entrant,15)})")
+                    c_imp_b = df_b[df_b["constituency"].str.strip() == sel_imp_const]                         .sort_values("total_votes", ascending=False).copy()
+                    if not c_imp_b.empty:
+                        tot_b = c_imp_b["total_votes"].sum()
+                        c_imp_b["Share %"] = (c_imp_b["total_votes"] / tot_b * 100).round(1)
+                        # Highlight new entrant row
+                        st.dataframe(
+                            c_imp_b[["candidate","party","total_votes","Share %"]].reset_index(drop=True),
+                            use_container_width=True, hide_index=True,
+                            column_config={
+                                "total_votes": st.column_config.NumberColumn("Votes", format="%d"),
+                                "Share %":     st.column_config.NumberColumn(format="%.1f%%"),
+                            },
+                        )
+                    else:
+                        st.info("No data for this constituency in this year.")
 
 with tab7:
     st.markdown('<div class="section-title">Ask Data</div>', unsafe_allow_html=True)
