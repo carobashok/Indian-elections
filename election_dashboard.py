@@ -1648,8 +1648,17 @@ with tab6:
                     st.plotly_chart(fig_imp, use_container_width=True)
 
                     # Table
-                    st.markdown('<div class="section-title">Party-wise Vote Share Detail</div>', unsafe_allow_html=True)
-                    disp_imp = impact.rename(columns={
+                    st.markdown('<div class="section-title">Party-wise Vote Detail</div>', unsafe_allow_html=True)
+
+                    # Add actual vote counts to impact table
+                    votes_a = df_a_impact.groupby("party")["total_votes"].sum().reset_index().rename(columns={"total_votes": f"Votes {cmp_year_a}"})
+                    votes_b = df_b_impact.groupby("party")["total_votes"].sum().reset_index().rename(columns={"total_votes": f"Votes {cmp_year_b}"})
+
+                    disp_imp = impact.merge(votes_a, on="party", how="left")                                      .merge(votes_b, on="party", how="left")
+                    disp_imp[f"Votes {cmp_year_a}"] = disp_imp[f"Votes {cmp_year_a}"].fillna(0).astype(int)
+                    disp_imp[f"Votes {cmp_year_b}"] = disp_imp[f"Votes {cmp_year_b}"].fillna(0).astype(int)
+                    disp_imp["Vote Change"] = disp_imp[f"Votes {cmp_year_b}"] - disp_imp[f"Votes {cmp_year_a}"]
+                    disp_imp = disp_imp.rename(columns={
                         "party":   "Party",
                         "share_a": f"Share % {cmp_year_a}",
                         "share_b": f"Share % {cmp_year_b}",
@@ -1657,13 +1666,18 @@ with tab6:
                     }).sort_values("Swing %", ascending=True)
 
                     st.dataframe(
-                        disp_imp, use_container_width=True, hide_index=True,
+                        disp_imp[["Party", f"Votes {cmp_year_a}", f"Votes {cmp_year_b}",
+                                  "Vote Change", f"Share % {cmp_year_a}", f"Share % {cmp_year_b}", "Swing %"]],
+                        use_container_width=True, hide_index=True,
                         height=min(500, 40 + len(disp_imp) * 38),
                         column_config={
-                            "Party":                st.column_config.TextColumn("Party", width="large"),
-                            f"Share % {cmp_year_a}": st.column_config.NumberColumn(format="%.2f%%"),
-                            f"Share % {cmp_year_b}": st.column_config.NumberColumn(format="%.2f%%"),
-                            "Swing %":              st.column_config.NumberColumn(format="%.2f%%"),
+                            "Party":                  st.column_config.TextColumn("Party", width="large"),
+                            f"Votes {cmp_year_a}":    st.column_config.NumberColumn(format="%d"),
+                            f"Votes {cmp_year_b}":    st.column_config.NumberColumn(format="%d"),
+                            "Vote Change":            st.column_config.NumberColumn(format="%d"),
+                            f"Share % {cmp_year_a}":  st.column_config.NumberColumn(format="%.2f%%"),
+                            f"Share % {cmp_year_b}":  st.column_config.NumberColumn(format="%.2f%%"),
+                            "Swing %":                st.column_config.NumberColumn(format="%.2f%%"),
                         },
                     )
 
@@ -1673,49 +1687,71 @@ with tab6:
                 st.markdown('<div class="section-title">Constituency Deep Dive</div>', unsafe_allow_html=True)
                 st.caption(f"Select a constituency where {shorten(sel_entrant,25)} contested in {cmp_year_b}")
 
-                entrant_const_list = sorted(entrant_consts)  # already uppercased
-
-
+                entrant_const_list = sorted(entrant_consts)
                 sel_imp_const = st.selectbox(
                     "Select Constituency", entrant_const_list, key="imp_const"
                 )
 
-                col_imp_l, col_imp_r = st.columns(2)
+                # Build single merged table: party | candidate_2026 | votes_a | votes_b | change | swing
+                c_imp_a = df_a[df_a["const_upper"] == sel_imp_const].copy()
+                c_imp_b = df_b[df_b["const_upper"] == sel_imp_const].copy()
 
-                with col_imp_l:
-                    st.markdown(f"**{cmp_year_a}** (before {shorten(sel_entrant,15)} existed)")
-                    c_imp_a = df_a[df_a["const_upper"] == sel_imp_const].sort_values("total_votes", ascending=False).copy()
+                if c_imp_b.empty:
+                    st.info("No data for this constituency.")
+                else:
+                    tot_a = c_imp_a["total_votes"].sum() if not c_imp_a.empty else 0
+                    tot_b = c_imp_b["total_votes"].sum()
+
+                    # Party votes in year B
+                    pv_b = c_imp_b.groupby("party").agg(
+                        candidate=("candidate","first"),
+                        votes_b=("total_votes","sum")
+                    ).reset_index()
+                    pv_b["share_b"] = (pv_b["votes_b"] / tot_b * 100).round(1) if tot_b > 0 else 0
+
+                    # Party votes in year A
                     if not c_imp_a.empty:
-                        tot_a = c_imp_a["total_votes"].sum()
-                        c_imp_a["Share %"] = (c_imp_a["total_votes"] / tot_a * 100).round(1)
-                        st.dataframe(
-                            c_imp_a[["candidate","party","total_votes","Share %"]].reset_index(drop=True),
-                            use_container_width=True, hide_index=True,
-                            column_config={
-                                "total_votes": st.column_config.NumberColumn("Votes", format="%d"),
-                                "Share %":     st.column_config.NumberColumn(format="%.1f%%"),
-                            },
-                        )
+                        pv_a = c_imp_a.groupby("party")["total_votes"].sum().reset_index().rename(columns={"total_votes":"votes_a"})
+                        pv_a["share_a"] = (pv_a["votes_a"] / tot_a * 100).round(1) if tot_a > 0 else 0
                     else:
-                        st.info("No data for this constituency in this year.")
+                        pv_a = pd.DataFrame(columns=["party","votes_a","share_a"])
 
-                with col_imp_r:
-                    st.markdown(f"**{cmp_year_b}** (with {shorten(sel_entrant,15)})")
-                    c_imp_b = df_b[df_b["const_upper"] == sel_imp_const].sort_values("total_votes", ascending=False).copy()
-                    if not c_imp_b.empty:
-                        tot_b = c_imp_b["total_votes"].sum()
-                        c_imp_b["Share %"] = (c_imp_b["total_votes"] / tot_b * 100).round(1)
-                        # Highlight new entrant row
-                        st.dataframe(
-                            c_imp_b[["candidate","party","total_votes","Share %"]].reset_index(drop=True),
-                            use_container_width=True, hide_index=True,
-                            column_config={
-                                "total_votes": st.column_config.NumberColumn("Votes", format="%d"),
-                                "Share %":     st.column_config.NumberColumn(format="%.1f%%"),
-                            },
-                        )
-                    else:
-                        st.info("No data for this constituency in this year.")
+                    # Merge
+                    merged = pv_b.merge(pv_a, on="party", how="left")
+                    merged["votes_a"]  = merged["votes_a"].fillna(0).astype(int)
+                    merged["share_a"]  = merged["share_a"].fillna(0).round(1)
+                    merged["change"]   = merged["votes_b"] - merged["votes_a"]
+                    merged["swing"]    = (merged["share_b"] - merged["share_a"]).round(1)
+                    merged = merged.sort_values("votes_b", ascending=False).reset_index(drop=True)
+
+                    merged = merged.rename(columns={
+                        "party":     "Party",
+                        "candidate": f"Candidate {cmp_year_b}",
+                        "votes_a":   f"Votes {cmp_year_a}",
+                        "votes_b":   f"Votes {cmp_year_b}",
+                        "share_a":   f"Share % {cmp_year_a}",
+                        "share_b":   f"Share % {cmp_year_b}",
+                        "change":    "Vote Change",
+                        "swing":     "Swing %",
+                    })
+
+                    st.dataframe(
+                        merged[["Party", f"Candidate {cmp_year_b}",
+                                f"Votes {cmp_year_a}", f"Votes {cmp_year_b}", "Vote Change",
+                                f"Share % {cmp_year_a}", f"Share % {cmp_year_b}", "Swing %"]],
+                        use_container_width=True, hide_index=True,
+                        height=min(500, 40 + len(merged) * 38),
+                        column_config={
+                            "Party":                   st.column_config.TextColumn("Party", width="medium"),
+                            f"Candidate {cmp_year_b}": st.column_config.TextColumn("Candidate", width="medium"),
+                            f"Votes {cmp_year_a}":     st.column_config.NumberColumn(format="%d"),
+                            f"Votes {cmp_year_b}":     st.column_config.NumberColumn(format="%d"),
+                            "Vote Change":             st.column_config.NumberColumn(format="%d"),
+                            f"Share % {cmp_year_a}":   st.column_config.NumberColumn(format="%.1f%%"),
+                            f"Share % {cmp_year_b}":   st.column_config.NumberColumn(format="%.1f%%"),
+                            "Swing %":                 st.column_config.NumberColumn(format="%.1f%%"),
+                        },
+                    )
 
 with tab7:
     st.markdown('<div class="section-title">Ask Data</div>', unsafe_allow_html=True)
