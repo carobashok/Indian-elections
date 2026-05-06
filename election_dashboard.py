@@ -1568,6 +1568,9 @@ with tab6:
                 entrant_consts = set(
                     df_b[df_b["party"] == sel_entrant]["constituency"].str.strip().str.upper().unique()
                 )
+                # Also normalize constituencies in both dfs for reliable matching
+                df_a["const_upper"] = df_a["constituency"].str.strip().str.upper()
+                df_b["const_upper"] = df_b["constituency"].str.strip().str.upper()
                 n_contested = len(entrant_consts)
 
                 # New entrant stats
@@ -1591,8 +1594,8 @@ with tab6:
                 st.caption(f"Comparing party vote shares in constituencies where {shorten(sel_entrant,25)} contested")
 
                 # Filter both years to only constituencies where entrant contested
-                df_a_impact = df_a[df_a["constituency"].str.strip().str.upper().isin(entrant_consts)].copy()
-                df_b_impact = df_b[df_b["constituency"].str.strip().str.upper().isin(entrant_consts)].copy()
+                df_a_impact = df_a[df_a["const_upper"].isin(entrant_consts)].copy()
+                df_b_impact = df_b[df_b["const_upper"].isin(entrant_consts)].copy()
 
                 if df_a_impact.empty or df_b_impact.empty:
                     st.warning("Not enough data to compute impact.")
@@ -1670,9 +1673,9 @@ with tab6:
                 st.markdown('<div class="section-title">Constituency Deep Dive</div>', unsafe_allow_html=True)
                 st.caption(f"Select a constituency where {shorten(sel_entrant,25)} contested in {cmp_year_b}")
 
-                entrant_const_list = sorted(
-                    df_b[df_b["party"]==sel_entrant]["constituency"].str.strip().unique()
-                )
+                entrant_const_list = sorted(entrant_consts)  # already uppercased
+
+
                 sel_imp_const = st.selectbox(
                     "Select Constituency", entrant_const_list, key="imp_const"
                 )
@@ -1681,7 +1684,7 @@ with tab6:
 
                 with col_imp_l:
                     st.markdown(f"**{cmp_year_a}** (before {shorten(sel_entrant,15)} existed)")
-                    c_imp_a = df_a[df_a["constituency"].str.strip() == sel_imp_const]                         .sort_values("total_votes", ascending=False).copy()
+                    c_imp_a = df_a[df_a["const_upper"] == sel_imp_const].sort_values("total_votes", ascending=False).copy()
                     if not c_imp_a.empty:
                         tot_a = c_imp_a["total_votes"].sum()
                         c_imp_a["Share %"] = (c_imp_a["total_votes"] / tot_a * 100).round(1)
@@ -1698,7 +1701,7 @@ with tab6:
 
                 with col_imp_r:
                     st.markdown(f"**{cmp_year_b}** (with {shorten(sel_entrant,15)})")
-                    c_imp_b = df_b[df_b["constituency"].str.strip() == sel_imp_const]                         .sort_values("total_votes", ascending=False).copy()
+                    c_imp_b = df_b[df_b["const_upper"] == sel_imp_const].sort_values("total_votes", ascending=False).copy()
                     if not c_imp_b.empty:
                         tot_b = c_imp_b["total_votes"].sum()
                         c_imp_b["Share %"] = (c_imp_b["total_votes"] / tot_b * 100).round(1)
