@@ -1630,7 +1630,7 @@ with tab6:
                         text=impact["swing"].apply(lambda v: f"{'▲' if v>=0 else '▼'} {abs(v):.1f}%"),
                         textposition="outside",
                         textfont=dict(size=13, color="#1a1a2e"),
-                        hovertemplate="<b>%{y}</b><br>Share {}: %{{customdata[0]:.1f}}%<br>Share {}: %{{customdata[1]:.1f}}%<br>Swing: %{{x:.1f}}%<extra></extra>".format(cmp_year_a, cmp_year_b),
+                        hovertemplate=f"<b>%{{y}}</b><br>Share {cmp_year_a}: %{{customdata[0]:.1f}}%<br>Share {cmp_year_b}: %{{customdata[1]:.1f}}%<br>Swing: %{{x:.1f}}%<extra></extra>",
                         customdata=impact[["share_a","share_b"]].values,
                     ))
                     fig_imp.update_layout(
