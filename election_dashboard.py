@@ -1024,12 +1024,13 @@ with tab6:
         pass  # placeholder — sub-tabs follow
 
     # ── Sub-tabs ───────────────────────────────────────────────────────────────
-        ctab1, ctab2, ctab3, ctab4, ctab5 = st.tabs([
+        ctab1, ctab2, ctab3, ctab4, ctab5, ctab6 = st.tabs([
             f"🏛️ Party Seats  {label_a} vs {label_b}",
             f"📊 Vote Share Swing  {label_a} vs {label_b}",
             f"🤝 Alliance  {label_a} vs {label_b}",
             f"📍 Constituency  {label_a} vs {label_b}",
             f"🆕 New Entrant Impact  {label_a} vs {label_b}",
+            f"🔬 Constituency Drill-Down",
         ])
 
         # ── Helper: compute winners ────────────────────────────────────────────────
