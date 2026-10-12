@@ -924,14 +924,18 @@ with tab5:
     total_c = cand_df["total_votes"].sum()
     sorted_cand = cand_df.sort_values("total_votes", ascending=False)
     w_row   = sorted_cand.iloc[0]   # highest votes = winner
-    r_row   = sorted_cand.iloc[1]   # second highest = runner up
-    margin  = int(w_row["total_votes"]) - int(r_row["total_votes"])
     winner_name = w_row["candidate"]  # ensure consistency
 
     m1,m2,m3 = st.columns(3)
-    m1.metric("🏆 Winner",         w_row["candidate"],  w_row["party"])
-    m2.metric("📊 Winning Margin", f"{margin:,} votes", f"{margin/total_c*100:.1f}% of total")
-    m3.metric("🗳️ Total Votes",    f"{total_c:,}",      f"{len(cand_df)} candidates")
+    m1.metric("🏆 Winner", w_row["candidate"], w_row["party"])
+    if len(sorted_cand) >= 2:
+        r_row  = sorted_cand.iloc[1]
+        margin = int(w_row["total_votes"]) - int(r_row["total_votes"])
+        m2.metric("📊 Winning Margin", f"{margin:,} votes",
+                  f"{margin/total_c*100:.1f}% of total" if total_c > 0 else "")
+    else:
+        m2.metric("📊 Winning Margin", "Uncontested", "Only candidate")
+    m3.metric("🗳️ Total Votes", f"{total_c:,}", f"{len(cand_df)} candidates")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1623,63 +1627,68 @@ with tab6:
                     impact = impact[impact[["share_a","share_b"]].max(axis=1) >= 0.5]
                     impact = impact.sort_values("swing", ascending=True).reset_index(drop=True)
 
-                    # Chart — swing per party
-                    colors_imp = ["#E24B4A" if v < 0 else "#1D9E75" for v in impact["swing"]]
-                    fig_imp = go.Figure(go.Bar(
-                        x=impact["swing"],
-                        y=impact["party"].apply(lambda p: shorten(p, 28)),
-                        orientation="h",
-                        marker_color=colors_imp,
-                        text=impact["swing"].apply(lambda v: f"{'▲' if v>=0 else '▼'} {abs(v):.1f}%"),
-                        textposition="outside",
-                        textfont=dict(size=13, color="#1a1a2e"),
-                        hovertemplate=f"<b>%{{y}}</b><br>Share {cmp_year_a}: %{{customdata[0]:.1f}}%<br>Share {cmp_year_b}: %{{customdata[1]:.1f}}%<br>Swing: %{{x:.1f}}%<extra></extra>",
-                        customdata=impact[["share_a","share_b"]].values,
-                    ))
-                    fig_imp.update_layout(
-                        height=max(350, len(impact) * 42),
-                        plot_bgcolor="white", paper_bgcolor="white", font=FONT,
-                        xaxis=dict(title="Vote Share Swing (%)", showgrid=True,
-                                   gridcolor="#f3f4f6", tickfont=dict(size=13, color="#1a1a2e"),
-                                   ticksuffix="%", title_font=dict(color="#1a1a2e")),
-                        yaxis=dict(tickfont=dict(size=13, color="#1a1a2e"), automargin=True),
-                        margin=dict(l=20, r=120, t=30, b=20),
-                    )
-                    st.plotly_chart(fig_imp, use_container_width=True)
+                    if impact.empty:
+                        st.info("No parties with meaningful vote share to compare.")
+                    else:
+                        # Chart — swing per party
+                        colors_imp = ["#E24B4A" if v < 0 else "#1D9E75" for v in impact["swing"]]
+                        cd_vals = impact[["share_a","share_b"]].values
+                        fig_imp = go.Figure(go.Bar(
+                            x=impact["swing"],
+                            y=impact["party"].apply(lambda p: shorten(p, 28)),
+                            orientation="h",
+                            marker_color=colors_imp,
+                            text=impact["swing"].apply(lambda v: f"{'▲' if v>=0 else '▼'} {abs(v):.1f}%"),
+                            textposition="outside",
+                            textfont=dict(size=13, color="#1a1a2e"),
+                            hovertemplate=f"<b>%{{y}}</b><br>Share {cmp_year_a}: %{{customdata[0]:.1f}}%<br>Share {cmp_year_b}: %{{customdata[1]:.1f}}%<br>Swing: %{{x:.1f}}%<extra></extra>",
+                            customdata=cd_vals,
+                        ))
+                        fig_imp.update_layout(
+                            height=max(350, len(impact) * 42),
+                            plot_bgcolor="white", paper_bgcolor="white", font=FONT,
+                            xaxis=dict(title="Vote Share Swing (%)", showgrid=True,
+                                       gridcolor="#f3f4f6", tickfont=dict(size=13, color="#1a1a2e"),
+                                       ticksuffix="%", title_font=dict(color="#1a1a2e")),
+                            yaxis=dict(tickfont=dict(size=13, color="#1a1a2e"), automargin=True),
+                            margin=dict(l=20, r=120, t=30, b=20),
+                        )
+                        st.plotly_chart(fig_imp, use_container_width=True)
 
-                    # Table
-                    st.markdown('<div class="section-title">Party-wise Vote Detail</div>', unsafe_allow_html=True)
+                        # Table
+                        st.markdown('<div class="section-title">Party-wise Vote Detail</div>', unsafe_allow_html=True)
 
-                    # Add actual vote counts to impact table
-                    votes_a = df_a_impact.groupby("party")["total_votes"].sum().reset_index().rename(columns={"total_votes": f"Votes {cmp_year_a}"})
-                    votes_b = df_b_impact.groupby("party")["total_votes"].sum().reset_index().rename(columns={"total_votes": f"Votes {cmp_year_b}"})
+                        # Add actual vote counts to impact table
+                        votes_a = df_a_impact.groupby("party")["total_votes"].sum().reset_index().rename(columns={"total_votes": f"Votes {cmp_year_a}"})
+                        votes_b = df_b_impact.groupby("party")["total_votes"].sum().reset_index().rename(columns={"total_votes": f"Votes {cmp_year_b}"})
 
-                    disp_imp = impact.merge(votes_a, on="party", how="left")                                      .merge(votes_b, on="party", how="left")
-                    disp_imp[f"Votes {cmp_year_a}"] = disp_imp[f"Votes {cmp_year_a}"].fillna(0).astype(int)
-                    disp_imp[f"Votes {cmp_year_b}"] = disp_imp[f"Votes {cmp_year_b}"].fillna(0).astype(int)
-                    disp_imp["Vote Change"] = disp_imp[f"Votes {cmp_year_b}"] - disp_imp[f"Votes {cmp_year_a}"]
-                    disp_imp = disp_imp.rename(columns={
-                        "party":   "Party",
-                        "share_a": f"Share % {cmp_year_a}",
-                        "share_b": f"Share % {cmp_year_b}",
-                        "swing":   "Swing %",
-                    }).sort_values("Swing %", ascending=True)
+                        disp_imp = impact.merge(votes_a, on="party", how="left") \
+                                         .merge(votes_b, on="party", how="left")
+                        disp_imp[f"Votes {cmp_year_a}"] = disp_imp[f"Votes {cmp_year_a}"].fillna(0).astype(int)
+                        disp_imp[f"Votes {cmp_year_b}"] = disp_imp[f"Votes {cmp_year_b}"].fillna(0).astype(int)
+                        disp_imp["Vote Change"] = disp_imp[f"Votes {cmp_year_b}"] - disp_imp[f"Votes {cmp_year_a}"]
+                        disp_imp = disp_imp.rename(columns={
+                            "party":   "Party",
+                            "share_a": f"Share % {cmp_year_a}",
+                            "share_b": f"Share % {cmp_year_b}",
+                            "swing":   "Swing %",
+                        }).sort_values("Swing %", ascending=True)
 
-                    st.dataframe(
-                        disp_imp[["Party", f"Votes {cmp_year_a}", f"Votes {cmp_year_b}",
-                                  "Vote Change", f"Share % {cmp_year_a}", f"Share % {cmp_year_b}", "Swing %"]],
-                        use_container_width=True, hide_index=True,
-                        height=min(500, 40 + len(disp_imp) * 38),
-                        column_config={
-                            "Party":                  st.column_config.TextColumn("Party", width="large"),
-                            f"Votes {cmp_year_a}":    st.column_config.NumberColumn(format="%d"),
-                            f"Votes {cmp_year_b}":    st.column_config.NumberColumn(format="%d"),
-                            "Vote Change":            st.column_config.NumberColumn(format="%d"),
-                            f"Share % {cmp_year_a}":  st.column_config.NumberColumn(format="%.2f%%"),
-                            f"Share % {cmp_year_b}":  st.column_config.NumberColumn(format="%.2f%%"),
-                            "Swing %":                st.column_config.NumberColumn(format="%.2f%%"),
-                        },
-                    )
+                        st.dataframe(
+                            disp_imp[["Party", f"Votes {cmp_year_a}", f"Votes {cmp_year_b}",
+                                      "Vote Change", f"Share % {cmp_year_a}", f"Share % {cmp_year_b}", "Swing %"]],
+                            use_container_width=True, hide_index=True,
+                            height=min(500, 40 + len(disp_imp) * 38),
+                            column_config={
+                                "Party":                  st.column_config.TextColumn("Party", width="large"),
+                                f"Votes {cmp_year_a}":    st.column_config.NumberColumn(format="%d"),
+                                f"Votes {cmp_year_b}":    st.column_config.NumberColumn(format="%d"),
+                                "Vote Change":            st.column_config.NumberColumn(format="%d"),
+                                f"Share % {cmp_year_a}":  st.column_config.NumberColumn(format="%.2f%%"),
+                                f"Share % {cmp_year_b}":  st.column_config.NumberColumn(format="%.2f%%"),
+                                "Swing %":                st.column_config.NumberColumn(format="%.2f%%"),
+                            },
+                        )
 
                 st.divider()
 
@@ -1764,16 +1773,37 @@ with tab7:
         unsafe_allow_html=True,
     )
 
-    DB_SCHEMA = """
+    # Build list of available elections for the SQL prompt
+    @st.cache_data(ttl=300)
+    def load_ask_elections():
+        resp = get_client().table("election_results") \
+            .select("state,election_year,election") \
+            .execute()
+        if resp.data:
+            edf = pd.DataFrame(resp.data).drop_duplicates()
+            lines = []
+            for (yr, el), grp in edf.groupby(["election_year","election"]):
+                states = sorted(grp["state"].unique())
+                lines.append(f"  {el} {yr}: {', '.join(states)}")
+            return "\n".join(lines)
+        return ""
+    elections_context = load_ask_elections()
+
+    DB_SCHEMA = f"""
 Table: election_results
 Columns:
   state TEXT, election_year SMALLINT, election TEXT,
   constituency TEXT, candidate TEXT, party TEXT,
   evm_votes INTEGER, postal_votes INTEGER, total_votes INTEGER (generated)
 Notes:
-- Lok Sabha stored as 'Loksabha'
-- Winner = candidate with highest total_votes per constituency
-- Use CTE with ROW_NUMBER() for winner queries, never window fn in WHERE
+- Lok Sabha stored as election='Loksabha'
+- State Assembly elections stored as election='State Assembly'
+- Winner = candidate with highest total_votes per constituency per election
+- Use CTE with ROW_NUMBER() for winner queries — NEVER use window functions in WHERE clause
+- Always filter by election AND election_year AND state when asked about a specific election
+
+Available data in the database:
+{elections_context}
 """
 
     @st.cache_data(ttl=300)
@@ -1791,14 +1821,18 @@ Notes:
 Schema:{DB_SCHEMA}{ALIAS_CONTEXT}
 Rules:
 - Use ILIKE for text matching. Limit to 50 rows unless aggregating.
-- NEVER use window functions in WHERE — always use CTE.
-- Winner CTE: WITH ranked AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY constituency,state,election_year,election ORDER BY total_votes DESC) AS rn FROM election_results) SELECT ... FROM ranked WHERE rn=1
+- CRITICAL: NEVER use window functions (ROW_NUMBER, RANK, etc.) in WHERE clause — ALWAYS use a CTE.
+- Winner CTE pattern: WITH ranked AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY constituency,state,election_year,election ORDER BY total_votes DESC) AS rn FROM election_results) SELECT ... FROM ranked WHERE rn=1
+- For "all assembly elections" queries: WHERE election = 'State Assembly' (no year filter unless specified)
+- For "all elections" queries: query across all years and election types in the table
 - Strike rate = seats_won / constituencies_contested (not total seats in state)
-- Include total_contested alongside seats_won for strike rate queries"""
+- Include total_contested alongside seats_won for strike rate queries
+- Use exact values from Available data above for election and election_year filters"""
 
-    ANSWER_SYSTEM = """You are an Indian election analyst. Explain the SQL result clearly in plain English.
-Format numbers with commas. Be concise. 
-Base performance categories on win % (seats won / contested), never on raw seat count alone."""
+    ANSWER_SYSTEM = f"""You are an Indian election analyst. The database contains election results across multiple elections and states. Available data: {elections_context}
+Explain the SQL result clearly in plain English. Format numbers with commas. Be concise.
+Base performance categories on win % (seats won / contested), never on raw seat count alone.
+If the data covers multiple states/years, mention that scope in your answer."""
 
     is_admin_ask = (
         st.session_state.get("admin_key","") != "" and
