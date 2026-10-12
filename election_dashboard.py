@@ -947,27 +947,45 @@ with tab6:
 
     # ── Comparison filters ─────────────────────────────────────────────────────
     fdf_c = load_filter_options()
+    all_elections_c = sorted(fdf_c["election"].unique())
 
-    cf1, cf2, cf3 = st.columns(3)
-    with cf1:
-        cmp_election = st.selectbox("Election Type", sorted(fdf_c["election"].unique()), key="cmp_election")
-    with cf2:
-        years_avail  = sorted(fdf_c[fdf_c["election"] == cmp_election]["election_year"].unique(), reverse=True)
-        cmp_year_a   = st.selectbox("Year A (Base)", years_avail, key="cmp_year_a")
-    with cf3:
-        years_b      = [y for y in years_avail if y != cmp_year_a]
-        if years_b:
-            cmp_year_b = st.selectbox("Year B (Compare)", years_b, key="cmp_year_b")
+    st.markdown("**Election A (Base)**")
+    ca1, ca2 = st.columns(2)
+    with ca1:
+        cmp_election_a = st.selectbox("Election Type A", all_elections_c, key="cmp_election_a")
+    with ca2:
+        years_a_avail = sorted(fdf_c[fdf_c["election"] == cmp_election_a]["election_year"].unique(), reverse=True)
+        cmp_year_a    = st.selectbox("Year A", years_a_avail, key="cmp_year_a")
+
+    st.markdown("**Election B (Compare)**")
+    cb1, cb2 = st.columns(2)
+    with cb1:
+        # default Election B to same type as A for convenience
+        default_b_idx = all_elections_c.index(cmp_election_a) if cmp_election_a in all_elections_c else 0
+        cmp_election_b = st.selectbox("Election Type B", all_elections_c, index=default_b_idx, key="cmp_election_b")
+    with cb2:
+        years_b_avail = sorted(fdf_c[fdf_c["election"] == cmp_election_b]["election_year"].unique(), reverse=True)
+        # exclude same year+type as A to avoid identical comparison
+        years_b_filtered = [y for y in years_b_avail if not (y == cmp_year_a and cmp_election_b == cmp_election_a)]
+        if years_b_filtered:
+            cmp_year_b = st.selectbox("Year B", years_b_filtered, key="cmp_year_b")
         else:
-            st.warning("Need at least 2 years of data for this election type.")
+            st.warning("No other year available for this election type.")
             cmp_year_b = None
 
-    # State filter
-    is_loksabha_cmp = "lok sabha" in cmp_election.lower() or "loksabha" in cmp_election.lower()
-    states_cmp = sorted(fdf_c[fdf_c["election"] == cmp_election]["state"].unique())
+    # State filter — union of states in both elections
+    states_a = set(fdf_c[fdf_c["election"] == cmp_election_a]["state"].unique())
+    states_b = set(fdf_c[fdf_c["election"] == cmp_election_b]["state"].unique())
+    states_cmp = sorted(states_a | states_b)
+    is_loksabha_cmp = any("loksabha" in e.lower() or "lok sabha" in e.lower()
+                          for e in [cmp_election_a, cmp_election_b])
     if is_loksabha_cmp:
         states_cmp = ["All States"] + states_cmp
     cmp_state = st.selectbox("State", states_cmp, key="cmp_state")
+
+    # Build short labels for display (e.g. "2021 State Assembly")
+    label_a = f"{cmp_year_a} {cmp_election_a}"
+    label_b = f"{cmp_year_b} {cmp_election_b}" if cmp_year_b else "?"
 
     st.divider()
 
@@ -979,19 +997,26 @@ with tab6:
         # ── Compare button ─────────────────────────────────────────────────────
         if st.button("🔍 Compare", type="primary", key="compare_btn"):
             st.session_state["compare_triggered"] = True
-            st.session_state["compare_params"] = (cmp_year_a, cmp_year_b, cmp_state, cmp_election)
+            st.session_state["compare_params"] = (cmp_year_a, cmp_year_b, cmp_state, cmp_election_a, cmp_election_b)
 
         if not st.session_state.get("compare_triggered"):
             st.info("Select your filters above and click **Compare** to see the results.")
         else:
-            current_params = (cmp_year_a, cmp_year_b, cmp_state, cmp_election)
+            current_params = (cmp_year_a, cmp_year_b, cmp_state, cmp_election_a, cmp_election_b)
             if st.session_state.get("compare_params") != current_params:
                 st.warning("Filters changed — click **Compare** again to refresh results.")
             else:
-                df_a = load_data(cmp_year_a, cmp_state, cmp_election)
-                df_b = load_data(cmp_year_b, cmp_state, cmp_election)
+                df_a = load_data(cmp_year_a, cmp_state, cmp_election_a)
+                df_b = load_data(cmp_year_b, cmp_state, cmp_election_b)
+                # For cross-election-type: scope to common constituencies
+                if cmp_election_a != cmp_election_b or cmp_state == "All States":
+                    common_consts = set(df_a["constituency"].str.strip().str.upper()) & \
+                                   set(df_b["constituency"].str.strip().str.upper())
+                    if common_consts:
+                        df_a = df_a[df_a["constituency"].str.strip().str.upper().isin(common_consts)].copy()
+                        df_b = df_b[df_b["constituency"].str.strip().str.upper().isin(common_consts)].copy()
                 if df_a.empty or df_b.empty:
-                    st.warning("Not enough data for comparison. Please check if both years have data loaded.")
+                    st.warning("Not enough data for comparison. No common constituencies found between the two elections.")
                 else:
                     _compare_ok = True
 
@@ -1000,11 +1025,11 @@ with tab6:
 
     # ── Sub-tabs ───────────────────────────────────────────────────────────────
         ctab1, ctab2, ctab3, ctab4, ctab5 = st.tabs([
-            f"🏛️ Party Seats  {cmp_year_a} vs {cmp_year_b}",
-            f"📊 Vote Share Swing  {cmp_year_a} vs {cmp_year_b}",
-            f"🤝 Alliance  {cmp_year_a} vs {cmp_year_b}",
-            f"📍 Constituency  {cmp_year_a} vs {cmp_year_b}",
-            f"🆕 New Entrant Impact  {cmp_year_a} vs {cmp_year_b}",
+            f"🏛️ Party Seats  {label_a} vs {label_b}",
+            f"📊 Vote Share Swing  {label_a} vs {label_b}",
+            f"🤝 Alliance  {label_a} vs {label_b}",
+            f"📍 Constituency  {label_a} vs {label_b}",
+            f"🆕 New Entrant Impact  {label_a} vs {label_b}",
         ])
 
         # ── Helper: compute winners ────────────────────────────────────────────────
@@ -1020,33 +1045,33 @@ with tab6:
         # Sub-tab 1 · Party Seats Comparison
         # ══════════════════════════════════════════════════════════════════════════
         with ctab1:
-            seats_a = winners_a.groupby("party").size().reset_index(name=str(cmp_year_a))
-            seats_b = winners_b.groupby("party").size().reset_index(name=str(cmp_year_b))
+            seats_a = winners_a.groupby("party").size().reset_index(name=label_a)
+            seats_b = winners_b.groupby("party").size().reset_index(name=label_b)
 
             seats_cmp = seats_a.merge(seats_b, on="party", how="outer").fillna(0)
-            seats_cmp[str(cmp_year_a)] = seats_cmp[str(cmp_year_a)].astype(int)
-            seats_cmp[str(cmp_year_b)] = seats_cmp[str(cmp_year_b)].astype(int)
-            seats_cmp["Change"]  = seats_cmp[str(cmp_year_b)] - seats_cmp[str(cmp_year_a)]
-            seats_cmp = seats_cmp.sort_values(str(cmp_year_b), ascending=False).reset_index(drop=True)
+            seats_cmp[label_a] = seats_cmp[label_a].astype(int)
+            seats_cmp[label_b] = seats_cmp[label_b].astype(int)
+            seats_cmp["Change"]  = seats_cmp[label_b] - seats_cmp[label_a]
+            seats_cmp = seats_cmp.sort_values(label_b, ascending=False).reset_index(drop=True)
 
             # Chart — grouped bar
             top_parties = seats_cmp.head(15)
             fig_cmp = go.Figure()
             fig_cmp.add_trace(go.Bar(
-                name=str(cmp_year_a),
+                name=label_a,
                 x=top_parties["party"].apply(lambda p: shorten(p, 20)),
-                y=top_parties[str(cmp_year_a)],
+                y=top_parties[label_a],
                 marker_color="#378ADD",
-                text=top_parties[str(cmp_year_a)],
+                text=top_parties[label_a],
                 textposition="outside",
                 textfont=dict(size=12),
             ))
             fig_cmp.add_trace(go.Bar(
-                name=str(cmp_year_b),
+                name=label_b,
                 x=top_parties["party"].apply(lambda p: shorten(p, 20)),
-                y=top_parties[str(cmp_year_b)],
+                y=top_parties[label_b],
                 marker_color="#1D9E75",
-                text=top_parties[str(cmp_year_b)],
+                text=top_parties[label_b],
                 textposition="outside",
                 textfont=dict(size=12),
             ))
@@ -1083,8 +1108,8 @@ with tab6:
                 height=min(500, 40 + len(disp_seats) * 38),
                 column_config={
                     "party":          st.column_config.TextColumn("Party", width="large"),
-                    str(cmp_year_a):  st.column_config.NumberColumn(str(cmp_year_a), format="%d"),
-                    str(cmp_year_b):  st.column_config.NumberColumn(str(cmp_year_b), format="%d"),
+                    label_a:  st.column_config.NumberColumn(label_a, format="%d"),
+                    label_b:  st.column_config.NumberColumn(label_b, format="%d"),
                     "Change":         st.column_config.TextColumn("Change"),
                 },
             )
@@ -1100,14 +1125,14 @@ with tab6:
                 vs["share"] = (vs["total_votes"] / total * 100).round(2)
                 return vs[["party", "share"]]
 
-            vs_a = vote_share(df_a).rename(columns={"share": str(cmp_year_a)})
-            vs_b = vote_share(df_b).rename(columns={"share": str(cmp_year_b)})
+            vs_a = vote_share(df_a).rename(columns={"share": label_a})
+            vs_b = vote_share(df_b).rename(columns={"share": label_b})
 
             vs_cmp = vs_a.merge(vs_b, on="party", how="outer").fillna(0)
-            vs_cmp[str(cmp_year_a)] = vs_cmp[str(cmp_year_a)].round(2)
-            vs_cmp[str(cmp_year_b)] = vs_cmp[str(cmp_year_b)].round(2)
-            vs_cmp["Swing"] = (vs_cmp[str(cmp_year_b)] - vs_cmp[str(cmp_year_a)]).round(2)
-            vs_cmp = vs_cmp[vs_cmp[[str(cmp_year_a), str(cmp_year_b)]].max(axis=1) >= 1.0]  # filter tiny parties
+            vs_cmp[label_a] = vs_cmp[label_a].round(2)
+            vs_cmp[label_b] = vs_cmp[label_b].round(2)
+            vs_cmp["Swing"] = (vs_cmp[label_b] - vs_cmp[label_a]).round(2)
+            vs_cmp = vs_cmp[vs_cmp[[label_a, label_b]].max(axis=1) >= 1.0]  # filter tiny parties
             vs_cmp = vs_cmp.sort_values("Swing", ascending=False).reset_index(drop=True)
 
             # Swing bar chart
@@ -1156,8 +1181,8 @@ with tab6:
                 height=min(500, 40 + len(disp_vs) * 38),
                 column_config={
                     "party":          st.column_config.TextColumn("Party",         width="large"),
-                    str(cmp_year_a):  st.column_config.NumberColumn(str(cmp_year_a), format="%.2f%%"),
-                    str(cmp_year_b):  st.column_config.NumberColumn(str(cmp_year_b), format="%.2f%%"),
+                    label_a:  st.column_config.NumberColumn(label_a, format="%.2f%%"),
+                    label_b:  st.column_config.NumberColumn(label_b, format="%.2f%%"),
                     "Swing":          st.column_config.TextColumn("Swing"),
                 },
             )
@@ -1193,8 +1218,8 @@ with tab6:
                     final = pd.concat([final, const_df[["alliance_name","party","constituency"]]], ignore_index=True)
                 return final.drop_duplicates()
 
-            amap_a = load_alliance_map(cmp_year_a, cmp_election, cmp_state)
-            amap_b = load_alliance_map(cmp_year_b, cmp_election, cmp_state)
+            amap_a = load_alliance_map(cmp_year_a, cmp_election_a, cmp_state)
+            amap_b = load_alliance_map(cmp_year_b, cmp_election_b, cmp_state)
 
             if amap_a.empty and amap_b.empty:
                 st.info("No alliance information available for either year. Upload alliance data via the Admin panel.")
@@ -1228,31 +1253,31 @@ with tab6:
                 st.markdown('<div class="section-title">Alliance Seats Comparison</div>', unsafe_allow_html=True)
                 st.caption("Note: Alliance compositions may differ between years — see Party Movement table below.")
 
-                al_seats_a = wa.groupby("alliance_name").size().reset_index(name=str(cmp_year_a))
-                al_seats_b = wb.groupby("alliance_name").size().reset_index(name=str(cmp_year_b))
+                al_seats_a = wa.groupby("alliance_name").size().reset_index(name=label_a)
+                al_seats_b = wb.groupby("alliance_name").size().reset_index(name=label_b)
                 al_cmp = al_seats_a.merge(al_seats_b, on="alliance_name", how="outer").fillna(0)
-                al_cmp[str(cmp_year_a)] = al_cmp[str(cmp_year_a)].astype(int)
-                al_cmp[str(cmp_year_b)] = al_cmp[str(cmp_year_b)].astype(int)
-                al_cmp["Change"] = al_cmp[str(cmp_year_b)] - al_cmp[str(cmp_year_a)]
-                al_cmp = al_cmp.sort_values(str(cmp_year_b), ascending=False).reset_index(drop=True)
+                al_cmp[label_a] = al_cmp[label_a].astype(int)
+                al_cmp[label_b] = al_cmp[label_b].astype(int)
+                al_cmp["Change"] = al_cmp[label_b] - al_cmp[label_a]
+                al_cmp = al_cmp.sort_values(label_b, ascending=False).reset_index(drop=True)
 
                 # Grouped bar chart
                 fig_al_cmp = go.Figure()
                 fig_al_cmp.add_trace(go.Bar(
-                    name=str(cmp_year_a),
+                    name=label_a,
                     x=al_cmp["alliance_name"].apply(lambda p: shorten(p, 20)),
-                    y=al_cmp[str(cmp_year_a)],
+                    y=al_cmp[label_a],
                     marker_color="#378ADD",
-                    text=al_cmp[str(cmp_year_a)],
+                    text=al_cmp[label_a],
                     textposition="outside",
                     textfont=dict(size=12),
                 ))
                 fig_al_cmp.add_trace(go.Bar(
-                    name=str(cmp_year_b),
+                    name=label_b,
                     x=al_cmp["alliance_name"].apply(lambda p: shorten(p, 20)),
-                    y=al_cmp[str(cmp_year_b)],
+                    y=al_cmp[label_b],
                     marker_color="#1D9E75",
-                    text=al_cmp[str(cmp_year_b)],
+                    text=al_cmp[label_b],
                     textposition="outside",
                     textfont=dict(size=12),
                 ))
@@ -1281,8 +1306,8 @@ with tab6:
                     height=min(400, 40 + len(al_disp) * 38),
                     column_config={
                         "alliance_name": st.column_config.TextColumn("Alliance", width="medium"),
-                        str(cmp_year_a): st.column_config.NumberColumn(str(cmp_year_a), format="%d"),
-                        str(cmp_year_b): st.column_config.NumberColumn(str(cmp_year_b), format="%d"),
+                        label_a: st.column_config.NumberColumn(label_a, format="%d"),
+                        label_b: st.column_config.NumberColumn(label_b, format="%d"),
                         "Change":        st.column_config.TextColumn("Change"),
                     },
                 )
@@ -1310,15 +1335,15 @@ with tab6:
                     if al_a != al_b:
                         movement.append({
                             "Party":          party,
-                            f"Alliance {cmp_year_a}": al_a,
-                            f"Alliance {cmp_year_b}": al_b,
+                            f"Alliance {label_a}": al_a,
+                            f"Alliance {label_b}": al_b,
                             "Movement":       f"{shorten(al_a,20)} → {shorten(al_b,20)}",
                         })
 
                 if movement:
                     mov_df = pd.DataFrame(movement)
                     st.dataframe(
-                        mov_df[["Party","Movement",f"Alliance {cmp_year_a}",f"Alliance {cmp_year_b}"]],
+                        mov_df[["Party","Movement",f"Alliance {label_a}",f"Alliance {label_b}"]],
                         use_container_width=True, hide_index=True,
                         height=min(400, 40 + len(mov_df) * 38),
                         column_config={
@@ -1338,8 +1363,8 @@ with tab6:
             # ── Build constituency comparison df ──────────────────────────────────
             const_a = winners_a[["constituency","candidate","party","total_votes"]].copy()
             const_b = winners_b[["constituency","candidate","party","total_votes"]].copy()
-            const_a.columns = ["constituency", f"winner_{cmp_year_a}", f"party_{cmp_year_a}", f"votes_{cmp_year_a}"]
-            const_b.columns = ["constituency", f"winner_{cmp_year_b}", f"party_{cmp_year_b}", f"votes_{cmp_year_b}"]
+            const_a.columns = ["constituency", f"winner_{label_a}", f"party_{label_a}", f"votes_{label_a}"]
+            const_b.columns = ["constituency", f"winner_{label_b}", f"party_{label_b}", f"votes_{label_b}"]
 
             # Normalize constituency names to uppercase for reliable matching
             const_a["constituency"] = const_a["constituency"].str.strip().str.upper()
@@ -1349,8 +1374,8 @@ with tab6:
 
             # Party-level result
             def party_result(row):
-                pa = row.get(f"party_{cmp_year_a}", None)
-                pb = row.get(f"party_{cmp_year_b}", None)
+                pa = row.get(f"party_{label_a}", None)
+                pb = row.get(f"party_{label_b}", None)
                 if pd.isna(pa) or pd.isna(pb): return "New/Missing"
                 return "Held" if pa == pb else "Flipped"
 
@@ -1364,8 +1389,8 @@ with tab6:
                 pm_b_map = party_alliance_map(amap_b)
 
                 def alliance_result(row):
-                    pa = row.get(f"party_{cmp_year_a}", None)
-                    pb = row.get(f"party_{cmp_year_b}", None)
+                    pa = row.get(f"party_{label_a}", None)
+                    pb = row.get(f"party_{label_b}", None)
                     if pd.isna(pa) or pd.isna(pb): return "New/Missing"
                     al_a = pm_a_map.get(pa, "Others / Unallied")
                     al_b = pm_b_map.get(pb, "Others / Unallied")
@@ -1409,12 +1434,12 @@ with tab6:
             # Rename columns nicely
             col_rename = {
                 "constituency":         "Constituency",
-                f"winner_{cmp_year_a}": f"Winner {cmp_year_a}",
-                f"party_{cmp_year_a}":  f"Party {cmp_year_a}",
-                f"votes_{cmp_year_a}":  f"Votes {cmp_year_a}",
-                f"winner_{cmp_year_b}": f"Winner {cmp_year_b}",
-                f"party_{cmp_year_b}":  f"Party {cmp_year_b}",
-                f"votes_{cmp_year_b}":  f"Votes {cmp_year_b}",
+                f"winner_{label_a}": f"Winner {label_a}",
+                f"party_{label_a}":  f"Party {label_a}",
+                f"votes_{label_a}":  f"Votes {label_a}",
+                f"winner_{label_b}": f"Winner {label_b}",
+                f"party_{label_b}":  f"Party {label_b}",
+                f"votes_{label_b}":  f"Votes {label_b}",
                 "Party Result":         "Party Result",
             }
             if has_alliance:
@@ -1429,8 +1454,8 @@ with tab6:
                 hide_index=True,
                 height=min(500, 40 + len(disp_const) * 38),
                 column_config={
-                    f"Votes {cmp_year_a}": st.column_config.NumberColumn(format="%d"),
-                    f"Votes {cmp_year_b}": st.column_config.NumberColumn(format="%d"),
+                    f"Votes {label_a}": st.column_config.NumberColumn(format="%d"),
+                    f"Votes {label_b}": st.column_config.NumberColumn(format="%d"),
                     "Party Result":        st.column_config.TextColumn("Party Result"),
                     "Alliance Result":     st.column_config.TextColumn("Alliance Result"),
                 },
@@ -1452,7 +1477,7 @@ with tab6:
 
             # Year A detail
             with col_l:
-                st.markdown(f"**{cmp_year_a}**")
+                st.markdown(f"**{label_a}**")
                 cand_a = df_a[df_a["constituency_upper"] == sel_const_cmp].sort_values("total_votes", ascending=False).copy()
                 if not cand_a.empty:
                     total_ca = cand_a["total_votes"].sum()
@@ -1472,7 +1497,7 @@ with tab6:
 
             # Year B detail
             with col_r:
-                st.markdown(f"**{cmp_year_b}**")
+                st.markdown(f"**{label_b}**")
                 cand_b = df_b[df_b["constituency_upper"] == sel_const_cmp].sort_values("total_votes", ascending=False).copy()
                 if not cand_b.empty:
                     total_cb = cand_b["total_votes"].sum()
@@ -1494,12 +1519,12 @@ with tab6:
             row_a = const_cmp[const_cmp["constituency"] == sel_const_cmp]
             if not row_a.empty:
                 r = row_a.iloc[0]
-                w_a  = r.get(f"winner_{cmp_year_a}", "—")
-                w_b  = r.get(f"winner_{cmp_year_b}", "—")
-                p_a  = r.get(f"party_{cmp_year_a}",  "—")
-                p_b  = r.get(f"party_{cmp_year_b}",  "—")
-                v_a  = int(r.get(f"votes_{cmp_year_a}", 0)) if pd.notna(r.get(f"votes_{cmp_year_a}")) else 0
-                v_b  = int(r.get(f"votes_{cmp_year_b}", 0)) if pd.notna(r.get(f"votes_{cmp_year_b}")) else 0
+                w_a  = r.get(f"winner_{label_a}", "—")
+                w_b  = r.get(f"winner_{label_b}", "—")
+                p_a  = r.get(f"party_{label_a}",  "—")
+                p_b  = r.get(f"party_{label_b}",  "—")
+                v_a  = int(r.get(f"votes_{label_a}", 0)) if pd.notna(r.get(f"votes_{label_a}")) else 0
+                v_b  = int(r.get(f"votes_{label_b}", 0)) if pd.notna(r.get(f"votes_{label_b}")) else 0
                 result = r.get("Party Result", "—")
                 result_color = "#1D9E75" if result == "Held" else "#E24B4A" if result == "Flipped" else "#888"
 
@@ -1508,7 +1533,7 @@ with tab6:
                             border:0.5px solid rgba(255,255,255,0.12);">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <div style="text-align:center;flex:1;">
-                            <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">{cmp_year_a} WINNER</div>
+                            <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">{label_a} WINNER</div>
                             <div style="font-size:14px;font-weight:600;color:#ffffff;">{w_a}</div>
                             <div style="font-size:12px;color:#9ca3af;">{p_a}</div>
                             <div style="font-size:13px;color:#f59e0b;">{v_a:,} votes</div>
@@ -1518,7 +1543,7 @@ with tab6:
                             <div style="font-size:12px;font-weight:600;color:{result_color};">{result}</div>
                         </div>
                         <div style="text-align:center;flex:1;">
-                            <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">{cmp_year_b} WINNER</div>
+                            <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">{label_b} WINNER</div>
                             <div style="font-size:14px;font-weight:600;color:#ffffff;">{w_b}</div>
                             <div style="font-size:12px;color:#9ca3af;">{p_b}</div>
                             <div style="font-size:13px;color:#f59e0b;">{v_b:,} votes</div>
@@ -1545,13 +1570,13 @@ with tab6:
             new_or_minor = sorted((parties_b - parties_a) | (parties_b & minor_in_a))
 
             if not new_entrants:
-                st.info(f"No new parties detected in {cmp_year_b} that were absent in {cmp_year_a}.")
+                st.info(f"No new parties detected in {label_b} that were absent in {label_a}.")
             else:
                 st.markdown(
-                    f'<div class="section-title">New Entrants in {cmp_year_b}</div>',
+                    f'<div class="section-title">New Entrants in {label_b}</div>',
                     unsafe_allow_html=True
                 )
-                st.caption(f"Parties that contested in {cmp_year_b} but were absent in {cmp_year_a}")
+                st.caption(f"Parties that contested in {label_b} but were absent in {label_a}")
 
                 # Show new entrants as badges
                 badge_html = " ".join([
@@ -1587,9 +1612,9 @@ with tab6:
                 # KPIs
                 k1, k2, k3, k4 = st.columns(4)
                 kpi(k1, "Constituencies Contested", str(n_contested),      f"by {shorten(sel_entrant, 20)}")
-                kpi(k2, "Seats Won",                str(entrant_seats),    f"in {cmp_year_b}")
+                kpi(k2, "Seats Won",                str(entrant_seats),    f"in {label_b}")
                 kpi(k3, "Total Votes",              f"{entrant_votes/1_00_000:.2f}L", "lakh votes")
-                kpi(k4, "Vote Share",               f"{entrant_share:.2f}%", f"of total in {cmp_year_b}")
+                kpi(k4, "Vote Share",               f"{entrant_share:.2f}%", f"of total in {label_b}")
 
                 st.divider()
 
@@ -1641,7 +1666,7 @@ with tab6:
                             text=impact["swing"].apply(lambda v: f"{'▲' if v>=0 else '▼'} {abs(v):.1f}%"),
                             textposition="outside",
                             textfont=dict(size=13, color="#1a1a2e"),
-                            hovertemplate=f"<b>%{{y}}</b><br>Share {cmp_year_a}: %{{customdata[0]:.1f}}%<br>Share {cmp_year_b}: %{{customdata[1]:.1f}}%<br>Swing: %{{x:.1f}}%<extra></extra>",
+                            hovertemplate=f"<b>%{{y}}</b><br>Share {label_a}: %{{customdata[0]:.1f}}%<br>Share {label_b}: %{{customdata[1]:.1f}}%<br>Swing: %{{x:.1f}}%<extra></extra>",
                             customdata=cd_vals,
                         ))
                         fig_imp.update_layout(
@@ -1659,33 +1684,33 @@ with tab6:
                         st.markdown('<div class="section-title">Party-wise Vote Detail</div>', unsafe_allow_html=True)
 
                         # Add actual vote counts to impact table
-                        votes_a = df_a_impact.groupby("party")["total_votes"].sum().reset_index().rename(columns={"total_votes": f"Votes {cmp_year_a}"})
-                        votes_b = df_b_impact.groupby("party")["total_votes"].sum().reset_index().rename(columns={"total_votes": f"Votes {cmp_year_b}"})
+                        votes_a = df_a_impact.groupby("party")["total_votes"].sum().reset_index().rename(columns={"total_votes": f"Votes {label_a}"})
+                        votes_b = df_b_impact.groupby("party")["total_votes"].sum().reset_index().rename(columns={"total_votes": f"Votes {label_b}"})
 
                         disp_imp = impact.merge(votes_a, on="party", how="left") \
                                          .merge(votes_b, on="party", how="left")
-                        disp_imp[f"Votes {cmp_year_a}"] = disp_imp[f"Votes {cmp_year_a}"].fillna(0).astype(int)
-                        disp_imp[f"Votes {cmp_year_b}"] = disp_imp[f"Votes {cmp_year_b}"].fillna(0).astype(int)
-                        disp_imp["Vote Change"] = disp_imp[f"Votes {cmp_year_b}"] - disp_imp[f"Votes {cmp_year_a}"]
+                        disp_imp[f"Votes {label_a}"] = disp_imp[f"Votes {label_a}"].fillna(0).astype(int)
+                        disp_imp[f"Votes {label_b}"] = disp_imp[f"Votes {label_b}"].fillna(0).astype(int)
+                        disp_imp["Vote Change"] = disp_imp[f"Votes {label_b}"] - disp_imp[f"Votes {label_a}"]
                         disp_imp = disp_imp.rename(columns={
                             "party":   "Party",
-                            "share_a": f"Share % {cmp_year_a}",
-                            "share_b": f"Share % {cmp_year_b}",
+                            "share_a": f"Share % {label_a}",
+                            "share_b": f"Share % {label_b}",
                             "swing":   "Swing %",
                         }).sort_values("Swing %", ascending=True)
 
                         st.dataframe(
-                            disp_imp[["Party", f"Votes {cmp_year_a}", f"Votes {cmp_year_b}",
-                                      "Vote Change", f"Share % {cmp_year_a}", f"Share % {cmp_year_b}", "Swing %"]],
+                            disp_imp[["Party", f"Votes {label_a}", f"Votes {label_b}",
+                                      "Vote Change", f"Share % {label_a}", f"Share % {label_b}", "Swing %"]],
                             use_container_width=True, hide_index=True,
                             height=min(500, 40 + len(disp_imp) * 38),
                             column_config={
                                 "Party":                  st.column_config.TextColumn("Party", width="large"),
-                                f"Votes {cmp_year_a}":    st.column_config.NumberColumn(format="%d"),
-                                f"Votes {cmp_year_b}":    st.column_config.NumberColumn(format="%d"),
+                                f"Votes {label_a}":    st.column_config.NumberColumn(format="%d"),
+                                f"Votes {label_b}":    st.column_config.NumberColumn(format="%d"),
                                 "Vote Change":            st.column_config.NumberColumn(format="%d"),
-                                f"Share % {cmp_year_a}":  st.column_config.NumberColumn(format="%.2f%%"),
-                                f"Share % {cmp_year_b}":  st.column_config.NumberColumn(format="%.2f%%"),
+                                f"Share % {label_a}":  st.column_config.NumberColumn(format="%.2f%%"),
+                                f"Share % {label_b}":  st.column_config.NumberColumn(format="%.2f%%"),
                                 "Swing %":                st.column_config.NumberColumn(format="%.2f%%"),
                             },
                         )
@@ -1694,7 +1719,7 @@ with tab6:
 
                 # ── Constituency Deep Dive ────────────────────────────────────
                 st.markdown('<div class="section-title">Constituency Deep Dive</div>', unsafe_allow_html=True)
-                st.caption(f"Select a constituency where {shorten(sel_entrant,25)} contested in {cmp_year_b}")
+                st.caption(f"Select a constituency where {shorten(sel_entrant,25)} contested in {label_b}")
 
                 entrant_const_list = sorted(entrant_consts)
                 sel_imp_const = st.selectbox(
@@ -1735,29 +1760,29 @@ with tab6:
 
                     merged = merged.rename(columns={
                         "party":     "Party",
-                        "candidate": f"Candidate {cmp_year_b}",
-                        "votes_a":   f"Votes {cmp_year_a}",
-                        "votes_b":   f"Votes {cmp_year_b}",
-                        "share_a":   f"Share % {cmp_year_a}",
-                        "share_b":   f"Share % {cmp_year_b}",
+                        "candidate": f"Candidate {label_b}",
+                        "votes_a":   f"Votes {label_a}",
+                        "votes_b":   f"Votes {label_b}",
+                        "share_a":   f"Share % {label_a}",
+                        "share_b":   f"Share % {label_b}",
                         "change":    "Vote Change",
                         "swing":     "Swing %",
                     })
 
                     st.dataframe(
-                        merged[["Party", f"Candidate {cmp_year_b}",
-                                f"Votes {cmp_year_a}", f"Votes {cmp_year_b}", "Vote Change",
-                                f"Share % {cmp_year_a}", f"Share % {cmp_year_b}", "Swing %"]],
+                        merged[["Party", f"Candidate {label_b}",
+                                f"Votes {label_a}", f"Votes {label_b}", "Vote Change",
+                                f"Share % {label_a}", f"Share % {label_b}", "Swing %"]],
                         use_container_width=True, hide_index=True,
                         height=min(500, 40 + len(merged) * 38),
                         column_config={
                             "Party":                   st.column_config.TextColumn("Party", width="medium"),
-                            f"Candidate {cmp_year_b}": st.column_config.TextColumn("Candidate", width="medium"),
-                            f"Votes {cmp_year_a}":     st.column_config.NumberColumn(format="%d"),
-                            f"Votes {cmp_year_b}":     st.column_config.NumberColumn(format="%d"),
+                            f"Candidate {label_b}": st.column_config.TextColumn("Candidate", width="medium"),
+                            f"Votes {label_a}":     st.column_config.NumberColumn(format="%d"),
+                            f"Votes {label_b}":     st.column_config.NumberColumn(format="%d"),
                             "Vote Change":             st.column_config.NumberColumn(format="%d"),
-                            f"Share % {cmp_year_a}":   st.column_config.NumberColumn(format="%.1f%%"),
-                            f"Share % {cmp_year_b}":   st.column_config.NumberColumn(format="%.1f%%"),
+                            f"Share % {label_a}":   st.column_config.NumberColumn(format="%.1f%%"),
+                            f"Share % {label_b}":   st.column_config.NumberColumn(format="%.1f%%"),
                             "Swing %":                 st.column_config.NumberColumn(format="%.1f%%"),
                         },
                     )
